@@ -129,15 +129,27 @@ class RichFileHandler(RichHandler):
 pyw_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 
 
+_log_file_handle = None
+
+
 def set_file_logger(name=pyw_name, *, do_cleanup=False):
     if '_' in name:
         name = name.split('_', 1)[0]
     log_file = f'./log/{date.today()}_{name}.txt'
+    global _log_file_handle
+    if _log_file_handle is not None:
+        # 重复设置文件日志时关闭上一个句柄，避免 fd 泄漏
+        try:
+            _log_file_handle.close()
+        except Exception:
+            pass
+        _log_file_handle = None
     try:
         file = open(log_file, mode='a', encoding='utf-8')
     except FileNotFoundError:
         os.mkdir('./log')
         file = open(log_file, mode='a', encoding='utf-8')
+    _log_file_handle = file
 
     file_console = Console(
         file=file,

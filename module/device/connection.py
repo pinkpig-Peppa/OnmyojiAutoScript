@@ -466,8 +466,8 @@ class Connection(ConnectionAttr):
                     logger.info(f'Reuse reverse: {reverse}')
                     port = int(reverse.local[4:])
                 else:
-                    logger.info(f'Remove redundant forward: {reverse}')
-                    self.adb_forward_remove(reverse.local)
+                    logger.info(f'Remove redundant reverse: {reverse}')
+                    self.adb_reverse_remove(reverse.local)
 
         if port:
             return port
@@ -535,8 +535,8 @@ class Connection(ConnectionAttr):
         # Disconnect offline device before connecting
         for device in self.list_device():
             if device.status == 'offline':
-                logger.warning(f'Device {serial} is offline, disconnect it before connecting')
-                self.adb_disconnect(serial)
+                logger.warning(f'Device {device.serial} is offline, disconnect it before connecting')
+                self.adb_disconnect(device.serial)
             elif device.status == 'unauthorized':
                 logger.error(f'Device {serial} is unauthorized, please accept ADB debugging on your device')
             elif device.status == 'device':
@@ -783,7 +783,7 @@ class Connection(ConnectionAttr):
                 raise RequestHumanTakeover
             elif available.count == 1:
                 logger.info(f'Auto device detection found only one device, using it')
-                self.serial = devices[0].serial
+                self.serial = available[0].serial
                 del_cached_property(self, 'adb')
             else:
                 logger.critical('Multiple devices found, auto device detection cannot decide which to choose, '

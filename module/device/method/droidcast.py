@@ -343,7 +343,8 @@ class DroidCast(Uiautomator2):
         logger.info('Stopping DroidCast')
         for proc in self._iter_droidcast_proc():
             logger.info(f'Kill pid={proc.pid}')
-            self.adb_shell(['kill', '-s', 9, proc.pid])
+            # kill -s 9 不是合法写法，且 pid 需为字符串
+            self.adb_shell(['kill', '-9', str(proc.pid)])
 
 
 

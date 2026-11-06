@@ -21,6 +21,7 @@ class Control(Minitouch, Adb, Scrcpy, Window):
     def click_methods(self):
         return {
             'ADB': self.click_adb,
+            'adb': self.click_adb,
             'uiautomator2': self.click_uiautomator2,
             'minitouch': self.click_minitouch,
             'window_message': self.click_window_message if IS_WINDOWS else None,
@@ -32,6 +33,7 @@ class Control(Minitouch, Adb, Scrcpy, Window):
     def long_click_methods(self):
         return {
             'ADB': self.long_click_adb,
+            'adb': self.long_click_adb,
             'uiautomator2': self.long_click_uiautomator2,
             'minitouch': self.long_click_minitouch,
             'window_message': self.long_click_window_message if IS_WINDOWS else None,
@@ -223,7 +225,7 @@ class Control(Minitouch, Adb, Scrcpy, Window):
             whitelist_area=whitelist_area,
             blacklist_area=blacklist_area
         )
-        self.swipe(p1, p2, duration=duration, name=name, distance_check=distance_check)
+        self.swipe(p1, p2, duration=duration, control_name=name, distance_check=distance_check)
 
     def drag(self, p1, p2, segments=1, shake=(0, 15), point_random=(-10, -10, 10, 10), shake_random=(-5, -5, 5, 5),
              swipe_duration=0.25, shake_duration=0.1, name='DRAG'):
@@ -232,7 +234,7 @@ class Control(Minitouch, Adb, Scrcpy, Window):
         logger.info(
             'Drag %s -> %s' % (point2str(*p1), point2str(*p2))
         )
-        method = self.config.script.emulator.control_method
+        method = self.config.script.device.control_method
         if method == 'minitouch':
             self.drag_minitouch(p1, p2, point_random=point_random)
         elif method == 'uiautomator2':

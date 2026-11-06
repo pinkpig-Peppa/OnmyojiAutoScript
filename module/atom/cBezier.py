@@ -120,6 +120,16 @@ class BezierTrajectory:
         :param yhh:在终点来回摆动的范围
         :return:返回一个字典trackArray对应轨迹数组，P对应贝塞尔曲线的影响点
         '''
+        # 退化保护：首末点重合、点数不足或竖直滑动（x 相同）时，
+        # 下面 _type/_bztsg 会除零或对空列表取 max()，直接走直线取点
+        numberList = int(numberList)
+        if start[0] == end[0] and start[1] == end[1]:
+            return [[int(start[0]), int(start[1])]]
+        if numberList < 2 or start[0] == end[0]:
+            numberList = max(numberList, 2)
+            return [[int(start[0] + (end[0] - start[0]) * i / (numberList - 1)),
+                     int(start[1] + (end[1] - start[1]) * i / (numberList - 1))]
+                    for i in range(numberList)]
         s = []
         fun = cls.simulation(start, end, le, deviation, bias)
         w = fun['P']
@@ -141,7 +151,6 @@ class BezierTrajectory:
                 else:
                     d = np.array([end[0] - (yhh - dq * i), ((end[1]-start[1])/(end[0]-start[0]))*(end[0]-(yhh-dq*i)) +(end[1]-((end[1]-start[1])/(end[0]-start[0]))*end[0])  ])
                     kg = 0
-                print(d)
                 y = cls.trackArray(ends, d, numberListOfcbb, le=2, deviation=0, bias=0.5, type=0, cbb=0, yhh=10)
                 s += list(y['trackArray'])
                 ends = d

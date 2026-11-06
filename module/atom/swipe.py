@@ -69,6 +69,9 @@ class RuleSwipe:
             start_pos, end_pos = self.coord()
             # 表示每秒移动1.5个像素点， 总的时间除以每个点10ms就得到总的点的个数
             number_list: int = int(dist(start_pos, end_pos) / (1.5 * self.interval))
+            if number_list < 2:
+                # 距离过近时点数为 0/1，贝塞尔/线性轨迹里会出现除零和空列表 max()
+                return [[int(start_pos[0]), int(start_pos[1])], [int(end_pos[0]), int(end_pos[1])]]
             le = random.randint(2, 4)  #
             deviation = random.randint(20, 40)  # 幅度
             b_type = 3
@@ -88,6 +91,9 @@ class RuleSwipe:
             start_pos, end_pos = self.coord()
             # 表示每秒移动1.5个像素点， 总的时间除以每个点10ms就得到总的点的个数
             number_list: int = int(dist(start_pos, end_pos) / (1.5 * self.interval))
+            if number_list < 2:
+                # (num_points - 1) 在点数为 0/1 时除零
+                return [[int(start_pos[0]), int(start_pos[1])], [int(end_pos[0]), int(end_pos[1])]]
 
             def generate_linear_trajectory(start_pos: tuple, end_pos: tuple, num_points: int) -> list:
                 """

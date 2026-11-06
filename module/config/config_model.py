@@ -391,11 +391,15 @@ class ConfigModel(ConfigBase):
         if group_object is None:  # deal list
             matchs = re.findall(r'\d+', group)
             index = int(matchs[-1]) - 1 if matchs else None
-            task_object_list = list(dict(task_object))
             for k, v in dict(task_object).items():
                 if k not in group:
                     continue
-                group_object = v[index] if group_object is None else None
+                if group_object is not None:
+                    # 已经选中过目标元素，不能再被后续命中重置为 None
+                    continue
+                if index is None or not (0 <= index < len(v)):
+                    continue
+                group_object = v[index]
         argument_object = getattr(group_object, argument, None)
 
         if argument_object is None:

@@ -59,9 +59,12 @@ class RuleClick:
         :param y:
         :return:
         """
+        # 入参是相对 roi_front 左上角的偏移量：先保存偏移，再取 roi 基址，
+        # 原实现直接覆盖入参并自我累加，导致点击坐标翻倍且与入参无关
+        offset_x, offset_y = x, y
         x, y, w, h = self.roi_front
-        x += x
-        y += y
+        x += offset_x
+        y += offset_y
         if x <= 0 :
             x = 0
         elif x >= 1280:

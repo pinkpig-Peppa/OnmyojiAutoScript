@@ -270,8 +270,7 @@ class EmulatorManager(Connection):
         """
         if command is None and emulator.kill_para is not None:
             command = '\"' + os.path.abspath(os.path.join(emulator.root, emulator.emu_path)) + '\"'
-            if emulator.multi_para is not None and multi_id is not None:
-                command += " " + emulator.multi_para.replace("#id", multi_id)
+            # 关闭模拟器不能带 multi_para（原为 emulator_start 的复制粘贴，参数会错乱）
             command += " " + emulator.kill_para
 
         logger.info('Kill emulator')

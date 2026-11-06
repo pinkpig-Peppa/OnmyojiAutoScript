@@ -11,7 +11,8 @@ from cached_property import cached_property
 from win32gui import (GetWindowText, EnumWindows, FindWindow, FindWindowEx,
                       IsWindow, GetWindowRect, GetWindowDC, DeleteObject,
                       SetForegroundWindow, IsWindowVisible, GetDC, GetParent,
-                      EnumChildWindows, SetForegroundWindow, GetClientRect)
+                      EnumChildWindows, SetForegroundWindow, GetClientRect,
+                      ReleaseDC)
 from win32con import (SRCCOPY, DESKTOPHORZRES, DESKTOPVERTRES, WM_LBUTTONUP,
                       WM_LBUTTONDOWN, WM_ACTIVATE, WA_ACTIVE, MK_LBUTTON,
                       WM_NCHITTEST, WM_SETCURSOR, HTCLIENT, WM_MOUSEMOVE,
@@ -54,39 +55,36 @@ class Window(Handle):
         widthScreen, heightScreen = self.screenshot_size
         # 返回句柄窗口的设备环境，覆盖整个窗口，包括非客户区，标题栏，菜单，边框
         hwndDc = GetWindowDC(self.screenshot_handle_num)
-        # 创建设备描述表
-        mfcDc = CreateDCFromHandle(hwndDc)
-        # 创建内存设备描述表
-        saveDc = mfcDc.CreateCompatibleDC()
-        # 创建位图对象准备保存图片
-        saveBitMap = CreateBitmap()
-        # 为bitmap开辟存储空间
-        saveBitMap.CreateCompatibleBitmap(mfcDc, widthScreen, heightScreen)
-        # 将截图保存到saveBitMap中
-        saveDc.SelectObject(saveBitMap)
-        # 保存bitmap到内存设备描述表
-        saveDc.BitBlt((0, 0), (widthScreen, heightScreen), mfcDc, (0, 0), SRCCOPY)
+        try:
+            # 创建设备描述表
+            mfcDc = CreateDCFromHandle(hwndDc)
+            # 创建内存设备描述表
+            saveDc = mfcDc.CreateCompatibleDC()
+            # 创建位图对象准备保存图片
+            saveBitMap = CreateBitmap()
+            try:
+                # 为bitmap开辟存储空间
+                saveBitMap.CreateCompatibleBitmap(mfcDc, widthScreen, heightScreen)
+                # 将截图保存到saveBitMap中
+                saveDc.SelectObject(saveBitMap)
+                # 保存bitmap到内存设备描述表
+                saveDc.BitBlt((0, 0), (widthScreen, heightScreen), mfcDc, (0, 0), SRCCOPY)
 
-        # 保存图像
-        signedIntsArray = saveBitMap.GetBitmapBits(True)
-        imgSrceen = frombuffer(signedIntsArray, dtype='uint8')
-        imgSrceen.shape = (heightScreen, widthScreen, 4)
-        # 这点很重要 在alas中图片以np.ndarray（RGB）的顺序存储。但是opencv是以BGR
-        imgSrceen = cv2.cvtColor(imgSrceen, cv2.COLOR_BGR2RGB)
-        # imgSrceen = cv2.resize(imgSrceen, (win_size[0], win_size[1]))
-        # 很奇怪的
-
-        # # 测试显示截图图片
-        # cv2.namedWindow('imgSrceen')  # 命名窗口
-        # cv2.imshow("imgSrceen", imgSrceen)  # 显示
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
-
-        # 内存释放
-        DeleteObject(saveBitMap.GetHandle())
-        saveDc.DeleteDC()
-        mfcDc.DeleteDC()
-        return imgSrceen
+                # 保存图像
+                signedIntsArray = saveBitMap.GetBitmapBits(True)
+                imgSrceen = frombuffer(signedIntsArray, dtype='uint8')
+                imgSrceen.shape = (heightScreen, widthScreen, 4)
+                # 这点很重要 在alas中图片以np.ndarray（RGB）的顺序存储。但是opencv是以BGR
+                imgSrceen = cv2.cvtColor(imgSrceen, cv2.COLOR_BGR2RGB)
+            finally:
+                # 内存释放
+                DeleteObject(saveBitMap.GetHandle())
+                saveDc.DeleteDC()
+                mfcDc.DeleteDC()
+            return imgSrceen
+        finally:
+            # GetWindowDC 必须成对 ReleaseDC，否则每次截图泄漏一个 GDI 句柄
+            ReleaseDC(self.screenshot_handle_num, hwndDc)
 
     def screenshot_desktop_bitblt(self):
         """桌面客户端后台截图：在 DPI 感知上下文内对客户区 DC 做 BitBlt。
@@ -108,19 +106,25 @@ class Window(Handle):
                     '请恢复游戏窗口（可被其他窗口遮挡，但不能最小化）'
                 )
             hwndDc = GetDC(self.screenshot_handle_num)
-            mfcDc = CreateDCFromHandle(hwndDc)
-            saveDc = mfcDc.CreateCompatibleDC()
-            saveBitMap = CreateBitmap()
-            saveBitMap.CreateCompatibleBitmap(mfcDc, widthScreen, heightScreen)
-            saveDc.SelectObject(saveBitMap)
-            saveDc.BitBlt((0, 0), (widthScreen, heightScreen), mfcDc, (0, 0), SRCCOPY)
-            signedIntsArray = saveBitMap.GetBitmapBits(True)
-            imgSrceen = frombuffer(signedIntsArray, dtype='uint8')
-            imgSrceen.shape = (heightScreen, widthScreen, 4)
-            imgSrceen = cv2.cvtColor(imgSrceen, cv2.COLOR_BGR2RGB)
-            DeleteObject(saveBitMap.GetHandle())
-            saveDc.DeleteDC()
-            mfcDc.DeleteDC()
+            try:
+                mfcDc = CreateDCFromHandle(hwndDc)
+                saveDc = mfcDc.CreateCompatibleDC()
+                saveBitMap = CreateBitmap()
+                try:
+                    saveBitMap.CreateCompatibleBitmap(mfcDc, widthScreen, heightScreen)
+                    saveDc.SelectObject(saveBitMap)
+                    saveDc.BitBlt((0, 0), (widthScreen, heightScreen), mfcDc, (0, 0), SRCCOPY)
+                    signedIntsArray = saveBitMap.GetBitmapBits(True)
+                    imgSrceen = frombuffer(signedIntsArray, dtype='uint8')
+                    imgSrceen.shape = (heightScreen, widthScreen, 4)
+                    imgSrceen = cv2.cvtColor(imgSrceen, cv2.COLOR_BGR2RGB)
+                finally:
+                    DeleteObject(saveBitMap.GetHandle())
+                    saveDc.DeleteDC()
+                    mfcDc.DeleteDC()
+            finally:
+                # GetDC 必须成对 ReleaseDC，否则每次截图泄漏一个 GDI 句柄
+                ReleaseDC(self.screenshot_handle_num, hwndDc)
         # 客户端锁定大小导致未校准到目标尺寸时兜底缩放，保证与资产同尺寸
         target_w, target_h = self.screenshot_size
         if (widthScreen, heightScreen) != (target_w, target_h):
@@ -159,9 +163,10 @@ class Window(Handle):
             result.append(self.root_node.children[0].num)
             return result
         elif self.emulator_family == EmulatorFamily.FAMILY_MEMU:
-            pass
+            # 迁移自 alas 时该实现被掏空，原样返回 None 会让 len(control_handle_list) 抛 TypeError
+            raise ScriptError('MEMU (逍遥模拟器) 暂不支持 window_message 后台控制，请改用 minitouch/ADB 控制方式')
         elif self.emulator_family == EmulatorFamily.FAMILY_BLUESTACKS:
-            pass
+            raise ScriptError('BlueStacks (蓝叠) 暂不支持 window_message 后台控制，请改用 minitouch/ADB 控制方式')
 
     @cached_property
     def mumu_head_height(self):

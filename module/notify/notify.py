@@ -19,6 +19,11 @@ class Notifier:
     def __init__(self, _config: str, enable: bool=False) -> None:
         self.config_name: str = ""
         self.enable: bool = enable
+        # 初始化失败会早退，这里先给出默认值，避免 push() 时访问不存在的属性
+        self.config: dict = {}
+        self.notifier = None
+        self.required: list[str] = []
+        self.provider_name = None
 
         if not self.enable:
             return
@@ -50,8 +55,11 @@ class Notifier:
     def push(self, **kwargs) -> bool:
         if not self.enable:
             return False
+        if self.notifier is None:
+            logger.warning("Notifier is not initialized, skip sending")
+            return False
         # 更新配置
-        kwargs["title"] = f"{self.config_name} {kwargs['title']}"
+        kwargs["title"] = f"{self.config_name} {kwargs.get('title', '')}"
         self.config.update(kwargs)
         # pre check
         for key in self.required:
@@ -64,7 +72,7 @@ class Notifier:
         if isinstance(self.notifier, Custom):
             if "method" not in self.config or self.config["method"] == "post":
                 self.config["datatype"] = "json"
-            if not ("data" in self.config or isinstance(self.config["data"], dict)):
+            if "data" not in self.config or not isinstance(self.config["data"], dict):
                 self.config["data"] = {}
             if "title" in kwargs:
                 self.config["data"]["title"] = kwargs["title"]

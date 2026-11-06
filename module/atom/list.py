@@ -57,7 +57,7 @@ class RuleList:
         :param after:
         :return:
         """
-        center: tuple = (self.roi_back[0] + self.roi_back[2]) // 2, (self.roi_back[1] + self.roi_back[3]) // 2
+        center: tuple = self.roi_back[0] + self.roi_back[2] // 2, self.roi_back[1] + self.roi_back[3] // 2
         distance: int = self.size[1] * number if self.is_vertical else self.size[0] * number
         random_start: int = randint(- self.size[0] // 4, self.size[0] // 4) if self.is_vertical else randint(- self.size[1] // 4, self.size[1] // 4)
         random_end: int = randint(- self.size[0] // 4, self.size[0] // 4) if self.is_vertical else randint(- self.size[1] // 4, self.size[1] // 4)
@@ -214,9 +214,10 @@ class RuleList:
 
             start_index = self.array.index(keyword_list[0])
             end_index = self.array.index(keyword_list[-1])
-            if name in keyword_list:
-                distance_start = 0
-                distance_end = 0
+            if name not in self.array:
+                # name 来自 OCR 识别结果，可能不在本列表的 array 内，直接 index() 会抛 ValueError
+                logger.warning(f'{name} not found in {self.array}')
+                return 2
 
             current_index = self.array.index(name)
             distance_start = 0

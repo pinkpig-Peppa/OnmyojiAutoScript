@@ -449,6 +449,7 @@ class Minitouch(Connection):
             try:
                 out = socket_out.readline().replace("\n", "").replace("\r", "")
             except socket.timeout:
+                socket_out.close()
                 client.close()
                 raise MinitouchOccupiedError(
                     'Timeout when connecting to minitouch, '
@@ -463,6 +464,7 @@ class Minitouch(Connection):
                 _, max_contacts, max_x, max_y, max_pressure, *_ = out.split(" ")
                 break
             except ValueError:
+                socket_out.close()
                 client.close()
                 if retry_timeout.reached():
                     raise MinitouchNotInstalledError(

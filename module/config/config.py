@@ -36,11 +36,14 @@ class Function:
             self.enable = False
             self.command = "Unknown"
             self.next_run = DEFAULT_TIME
+            # priority 用于 __str__/排序，早退分支也必须初始化
+            self.priority = 100
             return
         if data.get("scheduler") is None:
             self.enable = False
             self.command = "Unknown"
             self.next_run = DEFAULT_TIME
+            self.priority = 100
             return
 
         self.enable: bool = data['scheduler']['enable']
@@ -247,18 +250,21 @@ class Config(ConfigState, ConfigManual, ConfigWatcher, ConfigMenu):
         :return:
         """
         # 根据调度器更新时间来判断是否有可运行的任务,保证逻辑一致性
-        scheduler_update_dt = getattr(self, 'scheduler_update_dt', datetime.now())
+        scheduler_update_dt = getattr(self, 'scheduler_update_dt', None)
+        if scheduler_update_dt is None:
+            # Config.__getattr__ 对缺失属性返回 None，getattr 的默认值不会生效
+            scheduler_update_dt = datetime.now()
         running = {}
         if self.task is not None and self.task.next_run < scheduler_update_dt:
             running = {"name": self.task.command, "next_run": str(self.task.next_run)}
 
         pending = []
-        for p in self.pending_task[1:]:
+        for p in (self.pending_task or [])[1:]:
             item = {"name": p.command, "next_run": str(p.next_run)}
             pending.append(item)
 
         waiting = []
-        for w in self.waiting_task:
+        for w in (self.waiting_task or []):
             item = {"name": w.command, "next_run": str(w.next_run)}
             waiting.append(item)
 

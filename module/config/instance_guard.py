@@ -127,8 +127,12 @@ class _Heartbeat:
 
     def stop(self) -> None:
         """停止心跳线程。"""
-        if self._stop_event:
-            self._stop_event.set()
+        stop_event, thread = self._stop_event, self._thread
+        if stop_event:
+            stop_event.set()
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            # 必须 join：线程每轮都会读 self._stop_event，置 None 后会在条件处抛 AttributeError
+            thread.join(timeout=2)
         self._thread = None
         self._stop_event = None
 

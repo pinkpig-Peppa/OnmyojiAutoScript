@@ -166,7 +166,6 @@ class BaseCor:
                                                                           OcrMode.QUANTITY]:
             logger.warning(
                 f'[{self.name}] Score {score:.2f} is low, but result "{result}" contains a digit. Accepting it.')
-            print(f'能保留')
         else:
             result = ""
         # after proces
@@ -245,17 +244,15 @@ class BaseCor:
         indices = []
         # 对于keyword中的每一个字符，都要在strings中进行匹配
         # 如果这个字符在strings中的某一个string中，那么就记录这个string的index
-        max_index = len(strings) - 1
         for index, char in enumerate(keyword):
             for i, string in enumerate(strings):
                 if char not in string:
                     continue
-                if i <= max_index:
-                    indices.append(i)
-                    break
+                indices.append(i)
+                break
         if indices:
-            # 剔除掉重复的index
-            indices = list(set(indices))
+            # 去重但保持顺序：list(set()) 无序会让多框合并结果不稳定
+            indices = list(dict.fromkeys(indices))
             return indices
         else:
             return None
