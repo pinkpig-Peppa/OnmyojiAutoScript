@@ -544,6 +544,7 @@ class Script:
         """
         if command == 'start' or command == 'goto_main':
             logger.error(f'Invalid command `{command}`')
+            return False
 
         if not self._try_acquire_queue_token():
             return False
@@ -613,19 +614,26 @@ class Script:
             self.exception_handler(e=e, command=command)
             logger.critical('This is likely to be a mistake of developers, but sometimes just random issues')
             self.config.notifier.push(title=f'{I18n.trans_zh_cn(command)}{command}', content=f"<{self.config_name}> ScriptError")
-            exit(1)
+            state_queue = getattr(self, 'state_queue', None)
+            if state_queue is not None:
+                state_queue.put({"state": 2})
+            return False
         except RequestHumanTakeover as e:
             logger.critical(e)
             self.exception_handler(e=e, command=command)
             logger.critical('Request human takeover')
             self.config.notifier.push(title=f'{I18n.trans_zh_cn(command)}{command}', content=f"<{self.config_name}> RequestHumanTakeover")
-            exit(1)
+            # G13: 不再直接 exit(1) 静默杀进程，改为上报状态并受控返回
+            state_queue = getattr(self, 'state_queue', None)
+            if state_queue is not None:
+                state_queue.put({"state": 2})
+            return False
         except Exception as e:
             logger.exception(e)
             self.exception_handler(e=e, command=command)
             self.save_error_log()
             self.config.notifier.push(title=f'{I18n.trans_zh_cn(command)}{command}', content=f"<{self.config_name}> Exception occured")
-            exit(1)
+            return False
 
     def loop(self):
         """
@@ -733,7 +741,11 @@ class Script:
                 # 关闭模拟器
                 if self.config.script.error.error_repeated:
                     self.device.emulator_stop()
-                exit(1)
+                # G13: 不再直接 exit(1) 静默杀进程，改为上报状态并受控返回
+                state_queue = getattr(self, 'state_queue', None)
+                if state_queue is not None:
+                    state_queue.put({"state": 2})
+                return
 
             if success:
                 del_cached_property(self, 'config')

@@ -20,6 +20,23 @@ from module.server.main_manager import mm
 from starlette.staticfiles import StaticFiles
 
 
+def _cors_allow_origins() -> list[str]:
+    """跨域白名单：默认不限制（兼容旧前端），可通过 deploy 配置收紧"""
+    origins: list[str] = []
+    raw = getattr(State, 'webui_cors_origins', '') or ''
+    if not raw:
+        try:
+            raw = getattr(State.deploy_config, 'WebuiCorsOrigins', '') or ''
+        except Exception:
+            raw = ''
+    if isinstance(raw, str):
+        origins = [item.strip() for item in raw.split(',') if item.strip()]
+    return origins or ["*"]
+
+
+_CORS_ALLOW_ORIGINS = _cors_allow_origins()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await on_startup()
@@ -35,11 +52,24 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_CORS_ALLOW_ORIGINS,
+    # 通配来源时不能同时允许携带凭证，否则浏览器会直接拒绝该响应
+    allow_credentials=_CORS_ALLOW_ORIGINS != ["*"],
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+
+@app.middleware("http")
+async def webui_key_middleware(request: Request, call_next):
+    """配置了 --key 时强制校验口令，避免本机服务被任意页面/脚本调用"""
+    # CORS preflight OPTIONS requests carry no custom headers; let them pass to CORS middleware.
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if not State.check_webui_key(request.headers.get("x-oas-key") or request.query_params.get("key")):
+        return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED,
+                            content={'message': 'unauthorized'})
+    return await call_next(request)
 
 app.include_router(home_app)
 app.include_router(script_app)
@@ -72,7 +102,7 @@ async def on_startup():
     :return:
     """
     logger.info('OAS web service startup done')
-    if app.state.script_instances:
+    if getattr(app.state, 'script_instances', None):
         await mm.restart_processes(app.state.script_instances)
 
 
@@ -84,12 +114,11 @@ async def on_shutdown():
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Internal Server Error: ", exc_info=True)
 
-    message = ', '.join(str(arg) for arg in exc.args) if exc.args else str(exc)
-
+    # 只返回统一文案，避免把内部异常细节（路径 / 堆栈片段）暴露给 HTTP 调用方
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
-            'message': message
+            'message': 'Internal Server Error'
         },
     )
 
@@ -111,6 +140,7 @@ def fastapi_app():
         help="Run OAS by config names on startup",
     )
     args, _ = parser.parse_known_args()
+    State.webui_key = (args.key or '').strip()
     # ------------------------------------------------------------------------------------------------------------------
 
     runs = None

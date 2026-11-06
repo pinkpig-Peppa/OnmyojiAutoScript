@@ -106,7 +106,13 @@ SplitPanel{
         }
 
         //创建左边的菜单
-        const data = JSON.parse(process_manager.gui_menu())
+        var data
+        try {
+            data = JSON.parse(process_manager.gui_menu())
+        } catch (e) {
+            console.error("parse menu failed: " + e)
+            return
+        }
         if(MainEvent.branch == 'master'){
             if('Tools' in data){
                 delete data['Tools']

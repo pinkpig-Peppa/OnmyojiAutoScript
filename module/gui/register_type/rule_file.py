@@ -25,8 +25,8 @@ class RuleFile(QObject):
         :return:
         """
         folder = os.path.dirname(file)
-        if not os.path.exists(folder):
-            os.mkdir(folder)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder, exist_ok=True)
 
         if not os.path.exists(file):
             return ""
@@ -51,8 +51,8 @@ class RuleFile(QObject):
         :return:
         """
         folder = os.path.dirname(file)
-        if not os.path.exists(folder):
-            os.mkdir(folder)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder, exist_ok=True)
 
         _, ext = os.path.splitext(file)
         lock = FileLock(f"{file}.lock")

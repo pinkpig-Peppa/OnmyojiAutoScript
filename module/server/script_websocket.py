@@ -1,6 +1,7 @@
 # This Python file uses the following encoding: utf-8
 # @author runhey
 # github https://github.com/runhey
+import asyncio
 from typing import Iterable
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -66,16 +67,21 @@ class ScriptWSManager:
 
     async def _broadcast(self, connections: Iterable[WebSocket], sender_factory) -> None:
         dead_connections: list[WebSocket] = []
-        for connection in list(connections):
+
+        async def _send_one(connection: WebSocket) -> None:
             if connection.client_state == WebSocketState.DISCONNECTED:
                 dead_connections.append(connection)
-                continue
+                return
             try:
-                await sender_factory(connection)
-            except (RuntimeError, WebSocketDisconnect):
+                # 单个连接最多等 1s，避免一个卡死的客户端阻塞整个广播
+                await asyncio.wait_for(sender_factory(connection), timeout=1)
+            except (RuntimeError, WebSocketDisconnect, asyncio.TimeoutError):
                 dead_connections.append(connection)
             except Exception:
                 dead_connections.append(connection)
+
+        # 并发广播；原实现是串行 await，慢客户端会拖住所有日志/状态推送
+        await asyncio.gather(*(_send_one(connection) for connection in list(connections)))
         for connection in dead_connections:
             await self.disconnect(connection)
 

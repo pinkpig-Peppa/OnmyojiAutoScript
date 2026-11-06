@@ -290,8 +290,10 @@ Item {
 
             text:"Save image"
             onClicked: {
-                const i = ruleFile.file.lastIndexOf("/")
-                const imagepath = ruleFile.file.substring(0, i)
+                // Windows 下反斜杠也要能正确切分
+                const normalizedFile = ruleFile.file.replace(/\\/g, "/")
+                const i = normalizedFile.lastIndexOf("/")
+                const imagepath = normalizedFile.substring(0, i)
                 mirrorImage.save_target_image(ruleFile.currentItem.roiFront, imagepath +"/"+ruleFile.currentItem.itemName+'.png')
                 showSuccess("Save target image")
             }

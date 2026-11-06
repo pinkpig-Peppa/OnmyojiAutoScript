@@ -75,6 +75,9 @@ class MainManager(ConfigManager):
         from asyncio import sleep
         while 1:
             await sleep(3)
+            # G09: 清掉已经结束的广播任务，避免 tasks 只增不减
+            for task_name in [name for name, task in tasks.items() if task.done()]:
+                tasks.pop(task_name, None)
             if MainManager.signal_kill_server:  # 结束所有的进程
                 logger.info('Kill all server')
                 for script_p in self.script_process.values():
@@ -89,6 +92,11 @@ class MainManager(ConfigManager):
                 # 如果这个进程异常/运行中 那这个协程也应该存在
                 # logger.info(f'检测脚本的process: {name}')
                 if script_p.state == ScriptState.INACTIVE:
+                    # G09: 脚本停止后取消并移除对应的状态/日志广播协程
+                    for coroutine_name in (f'coroutine_state_{name}', f'coroutine_log_{name}'):
+                        task = tasks.pop(coroutine_name, None)
+                        if task is not None and not task.done():
+                            task.cancel()
                     continue
                 coroutine_state_name = f'coroutine_state_{name}'
                 if coroutine_state_name not in tasks:

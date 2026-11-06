@@ -33,13 +33,14 @@ class ScriptProcess(ScriptWSManager):
         self._process = None
 
     async def start(self):
-        self.state = ScriptState.RUNNING
-        await self.broadcast_state({"state": self.state})
         if self._process:
             logger.warning(f'Script {self.config_name} is initialized')
         if self._process and self._process.is_alive():
             logger.warning(f'Script {self.config_name} is already running and first stop it')
-            self.stop()
+            # stop() 会把状态置为 INACTIVE，因此必须在其之后再置 RUNNING
+            await self.stop()
+        self.state = ScriptState.RUNNING
+        await self.broadcast_state({"state": self.state})
         self._process = multiprocessing.Process(target=func,
                                                 args=(self.config_name, self.state_queue, self.log_pipe_in,),
                                                 name=self.config_name,
@@ -61,6 +62,9 @@ class ScriptProcess(ScriptWSManager):
         if self._process.is_alive():
             logger.error(f'Script {self.config_name} subprocess terminate failed')
             self._process.kill()
+            self._process.join(timeout=0.5)
+            if self._process.is_alive():
+                logger.error(f'Script {self.config_name} subprocess kill failed')
         self._process = None
 
     async def coroutine_broadcast_state(self):
@@ -70,6 +74,13 @@ class ScriptProcess(ScriptWSManager):
                     await sleep(1)
                     continue
                 await sleep(0.1)
+                if self._process is not None and not self._process.is_alive() \
+                        and self.state in (ScriptState.RUNNING, ScriptState.WARNING) \
+                        and self.state_queue.empty():
+                    logger.warning(f'Script {self.config_name} process exited unexpectedly, mark INACTIVE')
+                    self.state = ScriptState.INACTIVE
+                    await self.broadcast_state({"state": self.state})
+                    continue
                 try:
                     if self.state_queue.empty():
                         await sleep(1)

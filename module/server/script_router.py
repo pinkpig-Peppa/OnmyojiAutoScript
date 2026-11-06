@@ -9,7 +9,9 @@ from datetime import datetime
 from module.config.utils import convert_to_underscore
 
 from module.logger import logger
+from module.server.config_manager import safe_config_path
 from module.server.main_manager import mm
+from module.server.setting import State
 from module.server.script_process import ScriptProcess, ScriptState
 
 from tasks.Component.config_base import TimeDelta
@@ -32,7 +34,10 @@ async def config_list():
 
 @script_app.post('/config_copy')
 async def config_copy(file: str, template: str = 'template'):
-    mm.copy(file, template)
+    try:
+        mm.copy(file, template)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return mm.all_script_files()
 
 @script_app.get('/config_new_name')
@@ -54,12 +59,17 @@ async def config_rename(old_name: str = '', new_name: str = ''):
     """
     if old_name == new_name or new_name == '':
         return False
+    try:
+        renamed = mm.rename(old_name, new_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not renamed:
+        raise HTTPException(status_code=400, detail='Rename failed')
+    # 重命名成功后再丢弃旧的脚本进程包装，避免 rename 失败时丢失进程对象
     if old_name in mm.script_process:
         if mm.script_process[old_name].state != ScriptState.INACTIVE:
-            mm.script_process[old_name].stop()
+            await mm.script_process[old_name].stop()
         del mm.script_process[old_name]
-    if not mm.rename(old_name, new_name):
-        raise HTTPException(status_code=400, detail='Rename failed')
     return True
 
 
@@ -72,9 +82,13 @@ async def config_delete(name: str = ''):
     """
     if name == '' or name == 'template':
         raise HTTPException(status_code=400, detail='Delete failed')
+    try:
+        safe_config_path(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if name in mm.script_process:
         if mm.script_process[name].state != ScriptState.INACTIVE:
-            mm.script_process[name].stop()
+            await mm.script_process[name].stop()
         del mm.script_process[name]
     if not mm.delete(name):
         raise HTTPException(status_code=400, detail='Delete failed')
@@ -105,8 +119,11 @@ async def task_group_copy(task_name: str, group_name: str, dest_config_name: str
 @script_app.get('/{script_name}/start')
 async def script_start(script_name: str):
     if script_name not in mm.script_process:
-        mm.script_process[script_name] = ScriptProcess(script_name)
-    mm.script_process[script_name].start()
+        try:
+            mm.script_process[script_name] = ScriptProcess(script_name)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail=f'config {script_name}.json not found')
+    await mm.script_process[script_name].start()
     return
 
 @script_app.get('/{script_name}/stop')
@@ -114,7 +131,7 @@ async def script_stop(script_name: str):
     if script_name not in mm.script_process:
         logger.warning(f'[{script_name}] script process does not exist')
         return
-    mm.script_process[script_name].stop()
+    await mm.script_process[script_name].stop()
     return
 
 @script_app.get('/{script_name}/{task}/args')
@@ -203,12 +220,20 @@ async def script_task_log(script_name: str):
 
 @script_app.websocket("/ws/{script_name}")
 async def websocket_endpoint(websocket: WebSocket, script_name: str):
-    if script_name not in mm.script_process:
-        mm.script_process[script_name] = ScriptProcess(script_name)
-    script_process = mm.script_process[script_name]
-    await script_process.connect(websocket)
-
+    script_process = None
     try:
+        if not State.check_webui_key(websocket.query_params.get("key")):
+            await websocket.close(code=1008)
+            return
+        if script_name not in mm.script_process:
+            if script_name not in mm.all_script_files():
+                logger.warning(f'[{script_name}] websocket rejected, config not found')
+                await websocket.close(code=1008)
+                return
+            mm.script_process[script_name] = ScriptProcess(script_name)
+        script_process = mm.script_process[script_name]
+        await script_process.connect(websocket)
+
         await script_process.send_json(websocket, {"state": script_process.state})
         config = mm.config_cache(script_name)
         config.get_next()
@@ -230,7 +255,9 @@ async def websocket_endpoint(websocket: WebSocket, script_name: str):
 
     except WebSocketDisconnect:
         logger.warning(f'[{script_name}] websocket disconnect')
-        await script_process.disconnect(websocket)
+        if script_process is not None:
+            await script_process.disconnect(websocket)
     except Exception as e:
         logger.exception(f'[{script_name}] websocket error: {e}')
-        await script_process.disconnect(websocket)
+        if script_process is not None:
+            await script_process.disconnect(websocket)

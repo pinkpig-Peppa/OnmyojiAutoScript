@@ -72,8 +72,11 @@ def fun(ev: threading.Event):
     )
     args, _ = parser.parse_known_args()
 
-    host = args.host or State.deploy_config.WebuiHost or "0.0.0.0"
+    host = args.host or State.deploy_config.WebuiHost or "127.0.0.1"
     port = args.port or int(State.deploy_config.WebuiPort) or 22270
+    State.webui_key = (args.key or '').strip()
+    if State.webui_key and host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning("webui 已启用口令校验，请确认对外暴露的来源可信")
 
     logger.hr("Launcher config")
     logger.attr("Host", host)

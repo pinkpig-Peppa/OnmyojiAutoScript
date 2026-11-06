@@ -3,6 +3,7 @@
 # github https://github.com/runhey
 import sys
 import os
+import json
 
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
@@ -32,6 +33,9 @@ class FluentApp():
         # QGuiApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
         os.putenv("QT_QUICK_CONTROLS_STYLE", "Basic")
 
+        # G32: Qt6 的 HighDpiScaleFactorRoundingPolicy 只对“之后创建”的
+        # QGuiApplication 生效，必须放在创建 app 之前
+        FluentApp.apply_initial_dpi_strategy()
         FluentApp.app = QGuiApplication(sys.argv)
         QGuiApplication.setWindowIcon(QIcon(os.fspath(Path(__file__).resolve().parent / "res/icon.ico")))
         QGuiApplication.setApplicationName("oas")
@@ -45,8 +49,46 @@ class FluentApp():
         self.set_context_property(context=FluentApp.translator, name='translator')
         self.set_context_property(context=FluentApp.dpi, name='dpi')
 
+    @staticmethod
+    def apply_initial_dpi_strategy() -> None:
+        """
+        读取 setting.json 里的 dpiStrategy，在 QGuiApplication 创建前应用
+        """
+        strategy = ""
+        setting_path = Path.cwd() / 'module' / 'config' / 'argument' / 'setting.json'
+        try:
+            if setting_path.exists():
+                with open(setting_path, 'r', encoding='utf-8') as f:
+                    strategy = str(json.load(f).get('dpiStrategy', '') or '')
+        except Exception as e:
+            logger.error(f'load dpiStrategy failed: {e}')
+        policy = {
+            "default": Qt.HighDpiScaleFactorRoundingPolicy.PassThrough,
+            "round": Qt.HighDpiScaleFactorRoundingPolicy.Round,
+            "floor": Qt.HighDpiScaleFactorRoundingPolicy.Floor,
+            "ceil": Qt.HighDpiScaleFactorRoundingPolicy.Ceil,
+            "round_prefer_floor": Qt.HighDpiScaleFactorRoundingPolicy.RoundPreferFloor,
+        }.get(strategy, Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+        QGuiApplication.setHighDpiScaleFactorRoundingPolicy(policy)
+
+    # G33: 退出前需要执行的清理（停脚本进程、停 OCR 服务等）
+    on_quit_hooks = []
+
+    @classmethod
+    def add_quit_hook(cls, func) -> None:
+        cls.on_quit_hooks.append(func)
+
+    @classmethod
+    def _run_quit_hooks(cls) -> None:
+        for func in cls.on_quit_hooks:
+            try:
+                func()
+            except Exception:
+                logger.exception('FluentApp quit hook error')
+
     @classmethod
     def run(cls):
+        FluentApp.app.aboutToQuit.connect(FluentApp._run_quit_hooks)
         FluentApp.engine.load(os.fspath(Path(get_work_path() / 'module' / 'gui' / 'qml' / 'app.qml')))
         if not FluentApp.engine.rootObjects():
             sys.exit(-1)
@@ -84,6 +126,13 @@ class Translator(QObject):
         self.path_zh_CN = str((Path.cwd() / "module" / "config" / "i18n" / "zh_CN.qm").resolve())
 
         self.translator = QTranslator()
+        self._installed = False
+
+    def _install_translator(self) -> None:
+        if self._installed:
+            QGuiApplication.removeTranslator(self.translator)
+        QGuiApplication.installTranslator(self.translator)
+        self._installed = True
 
     @Slot(str)
     def set_language(self, language: str) -> None:
@@ -95,14 +144,14 @@ class Translator(QObject):
         if language == "简体中文":
             if not self.translator.load(self.path_zh_CN):
                 logger.error("load language 简体中文 failed!")
-            QGuiApplication.installTranslator(self.translator)
+            self._install_translator()
             self._engine.retranslate()
             return
 
         if language == "English":
             if not self.translator.load(self.path_en_US):
                 logger.error("load language English failed!")
-            QGuiApplication.installTranslator(self.translator)
+            self._install_translator()
             self._engine.retranslate()
             return
 

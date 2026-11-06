@@ -14,6 +14,8 @@ from module.logger import logger
 
 class PaintImage(QQuickPaintedItem):
 
+    imageChanged = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._image = QImage()
@@ -31,6 +33,7 @@ class PaintImage(QQuickPaintedItem):
         if self._image == image:
             return None
         self._image = image
+        self.imageChanged.emit()
         # 更新会触发paint事件
         self.update()
 
@@ -39,8 +42,11 @@ class PaintImage(QQuickPaintedItem):
         if not image_name.startswith("file:///"):
             logger.error("image path must start with file:///")
             return None
-        image_name = image_name.lstrip("file:///")
-
+        # lstrip 是按字符集裁剪，会把路径开头的 / 或字母也吃掉，必须按前缀截断
+        image_name = image_name[len("file:///"):]
+        # Windows 下 QUrl 可能给出 /C:/path 形式，去掉多余的根斜杠
+        if len(image_name) > 2 and image_name[0] == '/' and image_name[2] == ':':
+            image_name = image_name[1:]
 
         if self._image.load(image_name):
             logger.info("load image success")
@@ -49,7 +55,7 @@ class PaintImage(QQuickPaintedItem):
             logger.error("load image failed")
             return None
 
-    image = Property(QImage, fget=image, fset=set_image, notify=logger.info)
+    image = Property(QImage, fget=image, fset=set_image, notify=imageChanged)
 
     @Slot(str, str)
     def save_target_image(self, roi: str, file: str) -> None:
@@ -63,12 +69,22 @@ class PaintImage(QQuickPaintedItem):
             return
         if not isinstance(roi, str):
             logger.error("roi must be str")
+            return
         if not file:
             return
         if not isinstance(file, str):
             logger.error("file must be str")
             return
-        x, y, width, height = map(int, roi.split(','))
+        try:
+            x, y, width, height = map(int, roi.split(','))
+        except (TypeError, ValueError):
+            logger.error(f"invalid roi: {roi}")
+            return
+        if width <= 0 or height <= 0:
+            logger.error(f"invalid roi size: {roi}")
+            return
         roi_image = self._image.copy(x, y, width, height)
-        roi_image.save(file)
+        if not roi_image.save(file):
+            logger.error(f"save target image {file} failed")
+            return
         logger.info(f"save target image {file}success")

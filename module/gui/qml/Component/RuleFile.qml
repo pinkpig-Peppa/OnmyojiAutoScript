@@ -104,11 +104,14 @@ FluArea {
                            return
                        }
                        const filePath = selectedUrl.substring("file:///".length)
-                       const lastSlashIndex = filePath.lastIndexOf("/"); // 获取最后一个斜杠的索引
-                       const secondLastSlashIndex = filePath.lastIndexOf("/", lastSlashIndex - 1); // 获取倒数第二个斜杠的索引
 
-                       const filename = filePath.substring(lastSlashIndex + 1); // 获取文件名（带后缀）
-                       const directory = filePath.substring(secondLastSlashIndex+1, lastSlashIndex); // 获取文件所在的目录
+                       // Windows 下路径可能带反斜杠，统一成正斜杠后再切分
+                       const normalizedPath = filePath.replace(/\\/g, "/")
+                       const lastSlashIndex = normalizedPath.lastIndexOf("/")
+                       const secondLastSlashIndex = normalizedPath.lastIndexOf("/", lastSlashIndex - 1)
+
+                       const filename = normalizedPath.substring(lastSlashIndex + 1)
+                       const directory = normalizedPath.substring(secondLastSlashIndex+1, lastSlashIndex)
 
                        root.file = filePath
                        folderButton.text = directory
@@ -209,7 +212,12 @@ FluArea {
             // 如果是空的表示这个是一个刚刚建立的rule文件
             return
         }
-        data = JSON.parse(getData)
+        try {
+            data = JSON.parse(getData)
+        } catch (e) {
+            console.error("parse rule file failed: " + e)
+            return
+        }
         for(let item of data){
             listModel.append(item)
         }

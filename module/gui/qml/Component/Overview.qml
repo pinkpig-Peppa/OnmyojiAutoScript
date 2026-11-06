@@ -14,8 +14,11 @@ Item {
         interval: 2500 // 定时器间隔为一秒
         repeat: false // 设置为一次性定时器
         onTriggered: {
-            // 停止定时器
-            setStatus(MainEvent.RunStatus.Free)
+            // 只有还没收到后端状态时才回退为 Free，避免定时器覆盖真实运行状态
+            if (overStatus.runStatus === MainEvent.RunStatus.Init
+                    || overStatus.runStatus === MainEvent.RunStatus.Empty) {
+                setStatus(MainEvent.RunStatus.Free)
+            }
         }
     }
 
@@ -306,15 +309,12 @@ Item {
                 }
 
 
-                if (currentLine > maximumLineCount) {
-                    var index = textLog.text.indexOf("<br>"); //找到第一个<br>的位置
-                    if (index !== -1) {
-                        textLog.text = textLog.text.substring(index + 4); //从<br>之后开始截取字符串
-                        currentLine -= 1
-                    }
+                // 按 <br> 行数截断，原写法把多行 span 计为一行，截断逻辑失效
+                var lines = (textLog.text + log).split("<br>")
+                if (lines.length > maximumLineCount) {
+                    lines = lines.slice(lines.length - maximumLineCount)
                 }
-                currentLine += 1
-                textLog.text += log
+                textLog.text = lines.join("<br>")
 
             }
 
@@ -356,7 +356,13 @@ Item {
             return
         }
         pendingListModel.clear()
-        const d = JSON.parse(data)
+        var d
+        try {
+            d = JSON.parse(data)
+        } catch (e) {
+            console.error("parse pending data failed: " + e)
+            return
+        }
         for(var item of d){
             pendingListModel.append(item)
         }
@@ -374,7 +380,13 @@ Item {
             return
         }
         waitingListModel.clear()
-        const d = JSON.parse(data)
+        var d
+        try {
+            d = JSON.parse(data)
+        } catch (e) {
+            console.error("parse waiting data failed: " + e)
+            return
+        }
         for(var item of d){
             waitingListModel.append(item)
         }

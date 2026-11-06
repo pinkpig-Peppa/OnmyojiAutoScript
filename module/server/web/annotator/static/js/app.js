@@ -1375,7 +1375,7 @@
     }
   }
 
-  function adjustStageByImage() {
+  function adjustStageByImage(applyForm = true) {
     const naturalW = el.mainImage.naturalWidth || 1280;
     const naturalH = el.mainImage.naturalHeight || 720;
 
@@ -1395,7 +1395,10 @@
     el.imageStage.style.width = `${Math.round(naturalW * stageScale)}px`;
     el.imageStage.style.height = `${Math.round(naturalH * stageScale)}px`;
 
-    fillRuleForm();
+    // 只有图片尺寸真正变化时才重填表单；窗口 resize 时由调用方传 false
+    if (applyForm) {
+      fillRuleForm();
+    }
   }
 
   function resetListMeta() {
@@ -2795,7 +2798,8 @@
 
 
   window.addEventListener("resize", () => {
-    adjustStageByImage();
+    // G37: 仅重新计算舞台尺寸，避免 resize 覆盖正在编辑的表单
+    adjustStageByImage(false);
   });
 
   function cleanup(reason = "page_unload") {
