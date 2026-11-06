@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.16)
 
 project(example VERSION 0.1 LANGUAGES CXX)
 
@@ -46,16 +46,9 @@ foreach(filepath ${RES_PATHS})
 endforeach(filepath)
 
 #添加可执行文件
-if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    qt_add_executable(example
-        ${sources_files}
-        example.rc
-    )
-else ()
-    qt_add_executable(example
-        ${sources_files}
-    )
-endif ()
+qt_add_executable(example
+    ${sources_files}
+)
 
 #复制动态库到可执行文件同级目录下
 if(WIN32)
@@ -66,11 +59,15 @@ if(WIN32)
     endif()
     string(REPLACE "/" ${PATH_SEPARATOR} DLLPATH "${DLLPATH}")
     file(GLOB DLL_FILES ${DLLPATH})
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${DLL_FILES}
-        ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
-    )
+    if(DLL_FILES)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+            ${DLL_FILES}
+            ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+        )
+    else()
+        message(WARNING "${DLLPATH} 下没有找到 Qt 运行库，跳过 dll 拷贝（不影响编译）")
+    endif()
 endif()
 
 #添加qml模块

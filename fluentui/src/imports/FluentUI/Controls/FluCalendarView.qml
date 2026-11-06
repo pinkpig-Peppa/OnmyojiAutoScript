@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import FluentUI
 
@@ -190,6 +190,8 @@ Item {
                     }
                 }
 
+                // 注意：id 是历史命名。backgound_today 画「今天」的描边环，
+                // backgound_selected 画「已选中」的实心圆（Fluent：选中实心、今天描边）。
                 Rectangle{
                     id:backgound_today
                     anchors.centerIn: parent
@@ -197,7 +199,7 @@ Item {
                     height: 36
                     radius: 18
                     color:"#00000000"
-                    visible: isDay
+                    visible: isToDay
                     border.color: FluTheme.primaryColor.dark
                     border.width: 1
                 }
@@ -208,7 +210,7 @@ Item {
                     width: 30
                     height: 30
                     radius: 15
-                    visible: isToDay
+                    visible: isDay
                     color: FluTheme.primaryColor.dark
                 }
 
@@ -216,7 +218,7 @@ Item {
                     text:date.getDate()
                     anchors.centerIn: parent
                     color: {
-                        if(isToDay){
+                        if(isDay){
                             return "#FFFFFF"
                         }
                         if(isMonth){

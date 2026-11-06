@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Controls.Basic
@@ -24,6 +24,19 @@ Item {
         if (Window.window == null)
             return null;
         return Window.window;
+    }
+
+    onFooterItemsChanged: d.refreshFooterPlaceholders()
+
+    Component.onCompleted: d.refreshFooterPlaceholders()
+
+    Connections {
+        target: control.footerItems
+        enabled: control.footerItems !== null
+        ignoreUnknownSignals: true
+        function onChildrenChanged() {
+            d.refreshFooterPlaceholders();
+        }
     }
 
     function collapseAll() {
@@ -153,6 +166,38 @@ Item {
         property bool isMinimalAndPanel: d.displayMode === FluNavigationView.Minimal && d.enableNavigationPanel
         property var stackItems: []
 
+        // footer 的占位对象预创建在 control 下。原实现在 handleItems() 里
+        // createObject(items, ...)：items.children 随之变化会再次触发 model 绑定，
+        // 形成无限重建 + 对象泄漏。这里改成一次性创建、由外部信号驱动刷新。
+        property var footerPlaceholders: []
+
+        function refreshFooterPlaceholders() {
+            var count = footerItems ? footerItems.children.length : 0;
+            if (count === footerPlaceholders.length)
+                return;
+            var component = Qt.createComponent("FluPaneItemEmpty.qml");
+            if (component.status !== Component.Ready) {
+                console.warn("FluNavigationView: 无法加载 FluPaneItemEmpty.qml:", component.errorString());
+                return;
+            }
+            for (var j = 0; j < footerPlaceholders.length; j++) {
+                if (footerPlaceholders[j])
+                    footerPlaceholders[j].destroy();
+            }
+            var placeholders = [];
+            for (var i = 0; i < count; i++) {
+                var obj = component.createObject(control, {
+                                                     "idx": i
+                                                 });
+                if (obj) {
+                    placeholders.push(obj);
+                } else {
+                    console.warn("FluNavigationView: 创建 footer 占位项失败:", component.errorString());
+                }
+            }
+            footerPlaceholders = placeholders;
+        }
+
         function handleItems() {
             var idx = 0;
             var data = [];
@@ -173,13 +218,12 @@ Item {
                     }
                 }
                 if (footerItems) {
-                    var comEmpty = Qt.createComponent("FluPaneItemEmpty.qml");
                     for (var k = 0; k < footerItems.children.length; k++) {
                         var itemFooter = footerItems.children[k];
-                        if (comEmpty.status === Component.Ready) {
-                            var objEmpty = comEmpty.createObject(items, {
-                                    "idx": idx
-                                });
+                        var objEmpty = footerPlaceholders[k];
+                        if (objEmpty) {
+                            // 占位对象会被复用，每次重建 nav 列表都要把当前索引同步过去
+                            objEmpty.idx = idx;
                             itemFooter.idx = idx;
                             data.push(objEmpty);
                             idx++;

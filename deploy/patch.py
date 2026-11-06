@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 
 from deploy.logger import logger
 
@@ -82,9 +83,11 @@ def patch_uiautomator2():
         content = f.read()
 
     # Patch minicap_urls
-    res = re.search(r'self.minicap_urls', content)
-    if res:
-        content = re.sub(r'self.minicap_urls', '[]', content)
+    # 只替换 `for url in self.minicap_urls:` 这一句。原实现把内容里所有
+    # self.minicap_urls 都换成 []，一旦上游把它写在赋值/其它表达式里就会生成非法 Python。
+    minicap_loop = 'for url in self.minicap_urls:'
+    if minicap_loop in content:
+        content = content.replace(minicap_loop, 'for url in []:')
         modified = True
         logger.info(f'{init_file} minicap_urls patched')
     else:
@@ -108,6 +111,11 @@ def patch_uiautomator2():
 
     # Save file
     if modified:
+        # 修改第三方包源码前先留一份原始备份，方便出问题时回滚
+        backup_file = f'{init_file}.oas-bak'
+        if not os.path.exists(backup_file):
+            shutil.copy2(init_file, backup_file)
+            logger.info(f'{init_file} backup saved to {backup_file}')
         with open(init_file, 'w', encoding='utf-8') as f:
             f.write(content)
         logger.info(f'{init_file} content saved')

@@ -1,4 +1,4 @@
-﻿#ifndef STDAFX_H
+#ifndef STDAFX_H
 #define STDAFX_H
 
 #define Q_PROPERTY_AUTO(TYPE, M)                                                                                       \
@@ -7,6 +7,8 @@ public:                                                                         
   Q_SIGNAL void M##Changed();                                                                                          \
   void M(TYPE in_##M)                                                                                                  \
   {                                                                                                                    \
+    if (_##M == in_##M)                                                                                                \
+      return;                                                                                                          \
     _##M = in_##M;                                                                                                     \
     Q_EMIT M##Changed();                                                                                               \
   }                                                                                                                    \
@@ -16,6 +18,6 @@ public:                                                                         
   }                                                                                                                    \
                                                                                                                        \
 private:                                                                                                               \
-  TYPE _##M;
+  TYPE _##M{}
 
 #endif  // STDAFX_H

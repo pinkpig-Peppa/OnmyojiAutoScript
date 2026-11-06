@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import FluentUI
 
@@ -21,7 +21,7 @@ FluObject {
         function create(type,text,duration,moremsg){
             if(screenLayout){
                 var last = screenLayout.getLastloader();
-                if(last.type === type && last.text === text && moremsg === last.moremsg){
+                if(last && last.type === type && last.text === text && moremsg === last.moremsg){
                     last.restart();
                     return;
                 }
@@ -60,7 +60,13 @@ FluObject {
                     NumberAnimation { properties: "y"; easing.type: Easing.OutBack; duration: 300 }
                 }
 
-                onChildrenChanged: if(children.length === 0)  destroy();
+                onChildrenChanged: if(children.length === 0){
+                    // 销毁前把引用清空，否则下一次 create() 会访问已销毁对象
+                    if(mcontrol.screenLayout === this){
+                        mcontrol.screenLayout = null;
+                    }
+                    destroy();
+                }
 
                 function getLastloader(){
                     if(children.length > 0){

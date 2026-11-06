@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
@@ -372,6 +372,11 @@ Rectangle {
             list_view_3.currentIndex = list_view_3.model.indexOf(day)
             text_day.text = day
 
+            if(!window){
+                console.warn("FluDatePicker: Window.window 为空，无法定位弹窗")
+                popup.open()
+                return
+            }
             var pos = root.mapToItem(null, 0, 0)
             if(window.height>pos.y+root.height+container.height){
                 popup.y = root.height
@@ -380,6 +385,11 @@ Rectangle {
             } else {
                 popup.y = window.height-(pos.y+container.height)
             }
+            // 水平方向原先完全没定位，默认居中可能超出窗口右/左边缘，这里夹紧到窗口内
+            var centerX = (root.width - container.width) / 2
+            var maxX = window.width - (pos.x + container.width)
+            var minX = -pos.x
+            popup.x = Math.max(minX, Math.min(centerX, maxX))
             popup.open()
         }
 

@@ -1,4 +1,4 @@
-﻿#include "NativeEventFilter.h"
+#include "NativeEventFilter.h"
 #include "FluTheme.h"
 #include "FluApp.h"
 #ifdef Q_OS_WIN
@@ -6,6 +6,8 @@
 #pragma comment(lib, "User32.lib")
 #include <Windows.h>
 #include <windowsx.h>
+#include <QScreen>
+#include <QtMath>
 #endif
 
 bool NativeEventFilter::nativeEventFilter(const QByteArray &eventType, void *message, qintptr *result)
@@ -28,8 +30,13 @@ bool NativeEventFilter::nativeEventFilter(const QByteArray &eventType, void *mes
         }
         case WM_NCHITTEST: {
             auto view = FluApp::fluApp->wnds[(WId)msg->hwnd];
+            if (view == Q_NULLPTR) {
+                return false;
+            }
             bool isResize = !(view->maximumWidth()==view->minimumWidth()&&view->maximumHeight()==view->minimumHeight());
-            const LONG borderWidth = 8;
+            // 命中区域按设备像素比缩放，否则高 DPI 下可拖拽的边框过窄
+            const qreal dpr = view->screen() != Q_NULLPTR ? view->screen()->devicePixelRatio() : 1.0;
+            const LONG borderWidth = qRound(8 * dpr);
             RECT winrect;
             GetWindowRect(msg->hwnd, &winrect);
             long x = GET_X_LPARAM(msg->lParam);

@@ -1,4 +1,4 @@
-﻿#include "FluTheme.h"
+#include "FluTheme.h"
 
 #include "Def.h"
 #include <QPalette>
@@ -23,9 +23,8 @@ bool FluTheme::eventFilter(QObject *obj, QEvent *event)
     Q_UNUSED(obj);
     if (event->type() == QEvent::ApplicationPaletteChange)
     {
+        // 只通知 QML 刷新，不要把事件吞掉，否则其它控件收不到应用级调色板变化
         Q_EMIT darkChanged();
-        event->accept();
-        return true;
     }
     return false;
 }
