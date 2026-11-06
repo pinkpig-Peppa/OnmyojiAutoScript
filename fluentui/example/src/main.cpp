@@ -1,4 +1,4 @@
-﻿#include <QGuiApplication>
+#include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QDir>
@@ -34,7 +34,8 @@ int main(int argc, char *argv[])
         return 0;
     }
     if(ipc.isAttached()){
-        ipc.registerEventHandler(activeWindowEvent,[&appInfo](const QByteArray&){
+        // 按值捕获指针：按引用捕获局部变量在回调时已失效
+        ipc.registerEventHandler(activeWindowEvent,[appInfo](const QByteArray&){
             Q_EMIT appInfo->activeWindow();
             return true;
         });

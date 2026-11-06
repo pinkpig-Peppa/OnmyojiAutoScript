@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Generic, Iterable, TypeVar
 
+from deploy.logger import logger
+
 T = TypeVar("T")
 
 DEPLOY_CONFIG = './config/deploy.yaml'
@@ -85,7 +87,7 @@ def poor_yaml_read(file):
                         v = False
                     elif v.lower() == 'true':
                         v = True
-                    elif v.isdigit():
+                    elif re.fullmatch(r'-?\d+', v):
                         v = int(v)
                     data[k] = v
 
@@ -99,8 +101,13 @@ def poor_yaml_write(data, file, template_file=DEPLOY_TEMPLATE):
         file (str):
         template_file (str):
     """
-    with open(template_file, 'r', encoding='utf-8') as f:
-        text = f.read().replace('\\', '/')
+    if os.path.exists(template_file):
+        with open(template_file, 'r', encoding='utf-8') as f:
+            text = f.read().replace('\\', '/')
+    else:
+        # 模板缺失时退化为按配置项逐条生成，避免 open() 直接抛 FileNotFoundError
+        logger.warning(f'Deploy template {template_file} not found, generate config from data')
+        text = ''
 
     for key, value in data.items():
         if value is None:
@@ -109,7 +116,23 @@ def poor_yaml_write(data, file, template_file=DEPLOY_TEMPLATE):
             value = "true"
         elif value is False:
             value = "false"
-        text = re.sub(f'{key}:.*?\n', f'{key}: {value}\n', text)
+        if text:
+            # 用 lambda 做替换值，避免 value 中的反斜杠被当成正则转义；
+            # 同时兼容模板最后一行没有换行符的情况
+            new_text, count = re.subn(rf'^{re.escape(str(key))}:.*?$',
+                                      lambda m, k=key, v=value: f'{k}: {v}',
+                                      text, count=1, flags=re.M)
+            if count:
+                text = new_text
+            else:
+                text += f'{key}: {value}\n'
+        else:
+            text += f'{key}: {value}\n'
+
+    # ./config 目录可能不存在（首次运行/干净 clone），先建父目录再写
+    folder = os.path.dirname(file)
+    if folder and not os.path.isdir(folder):
+        os.makedirs(folder, exist_ok=True)
 
     with open(file, 'w', encoding='utf-8', newline='') as f:
         f.write(text)

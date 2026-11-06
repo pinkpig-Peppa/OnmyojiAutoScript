@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.16)
 
 project(fluentui LANGUAGES CXX)
 
@@ -53,7 +53,7 @@ qt_add_qml_module(fluentui
     OUTPUT_DIRECTORY ${CMAKE_PREFIX_PATH}/qml/FluentUI
     VERSION 1.0
     URI "FluentUI"
-    SOURCES ${sources_files} fluentui.rc
+    SOURCES ${sources_files}
     QML_FILES ${qml_files}
     RESOURCES ${resource_files}
 )

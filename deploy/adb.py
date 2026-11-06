@@ -73,7 +73,8 @@ class AdbManager(DeployConfig):
                     except ConnectionError:
                         if _ == 1:
                             raise
-                        init.GITHUB_BASEURL = 'http://tool.appetizer.io/openatx'
+                        # 曾在这里把 init.GITHUB_BASEURL 改成明文 HTTP 的第三方镜像，
+                        # 会允许中间人替换要安装到设备上的 APK，已移除，使用上游默认 HTTPS 源。
 
                 initer._device.shell(["rm", "/data/local/tmp/minicap"])
                 initer._device.shell(["rm", "/data/local/tmp/minicap.so"])

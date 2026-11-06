@@ -78,7 +78,9 @@ ComboBox {
             radius:8
         }
         color:{
-            if(disabled){
+            // disabled 是 FluComboBox 自己的属性（enabled: !disabled），
+            // 但外部直接写 enabled: false 会覆盖那个绑定，所以这里同时判断 control.enabled
+            if(!control.enabled || disabled){
                 return disableColor
             }
             return hovered ? hoverColor :normalColor

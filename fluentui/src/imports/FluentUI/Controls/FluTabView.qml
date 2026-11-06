@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import FluentUI
@@ -324,7 +324,8 @@ Item {
                 property var argument: model.argument
                 anchors.fill: parent
                 sourceComponent: model.page
-                visible: tab_nav.currentIndex === index
+                // 用 active 而不是 visible：非当前页应当卸载，否则每个 tab 页面常驻内存
+                active: tab_nav.currentIndex === index
             }
         }
     }

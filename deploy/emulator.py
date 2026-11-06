@@ -4,12 +4,19 @@ import os
 import re
 import shutil
 import subprocess
-import winreg
+import sys
 
 from deploy.logger import logger
 from deploy.utils import cached_property
 
-asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+try:
+    # winreg 只在 Windows 上存在，避免在其它平台 import 时直接 ModuleNotFoundError
+    import winreg
+except ImportError:  # pragma: no cover
+    winreg = None
+
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 
 class VirtualBoxEmulator:
@@ -152,6 +159,9 @@ class VirtualBoxEmulator:
         """ Revert adb replacement """
         for ori in self.adb_binary:
             logger.info(f'Recovering {ori}')
+            # adb_backup 从 .bak 开始取第一个不存在的文件名，所以 .bak 里保存的正是
+            # 第一次替换前的原始 adb（.bak1/.bak2 是之后被换下来的 OAS 版 adb），
+            # 因此恢复原始 adb 只能读 .bak。
             bak = f'{ori}.bak'
             if os.path.exists(bak):
                 logger.info(f'Delete {ori}')
@@ -331,9 +341,14 @@ class EmulatorConnect:
         for emulator in self.emulators:
             serial += emulator.serial
             for s in emulator.serial:
-                ip, port = s.split(':')
-                port = int(port) - 1
-                if 5554 <= int(port) < 5600:
+                if ':' not in s:
+                    continue
+                _, port = s.rsplit(':', 1)
+                try:
+                    port = int(port) - 1
+                except ValueError:
+                    continue
+                if 5554 <= port < 5600:
                     serial.append(f'emulator-{port}')
 
         return serial

@@ -1,6 +1,7 @@
 # This Python file uses the following encoding: utf-8
 # copy from alas https://github.com/LmeSzinc/AzurLaneAutoScript
 import copy
+import os
 from typing import Optional, Union
 
 from deploy.logger import logger
@@ -17,7 +18,8 @@ class ConfigModel:
     Branch: str = "master"
     GitExecutable: str = "./toolkit/Git/mingw64/bin/git.exe"
     GitProxy: Optional[str] = None
-    SSLVerify: bool = False
+    # 默认开启 TLS 校验；需要放宽时可显式设置环境变量 OAS_SSL_VERIFY=0
+    SSLVerify: bool = os.environ.get('OAS_SSL_VERIFY', '1').strip().lower() not in ('0', 'false', 'no', 'off')
     AutoUpdate: bool = True
     KeepLocalChanges: bool = False
 
@@ -81,7 +83,7 @@ class DeployConfig(ConfigModel):
         for k, v in self.config.items():
             if k in ("Password", "SSHUser"):
                 continue
-            if self.config_template[k] == v:
+            if self.config_template.get(k) == v:
                 continue
             logger.info(f"{k}: {v}")
 
@@ -89,12 +91,19 @@ class DeployConfig(ConfigModel):
 
     def read(self):
         self.config_template = poor_yaml_read(DEPLOY_TEMPLATE)
+        if not self.config_template:
+            # 模板缺失时用 ConfigModel 的类默认值兜底，否则下面取 Repository 会 KeyError
+            self.config_template = {
+                k: v for k, v in ConfigModel.__dict__.items()
+                if not k.startswith('_') and not callable(v)
+            }
+            logger.warning(f'Deploy template {DEPLOY_TEMPLATE} not found, fallback to ConfigModel defaults')
         self.config = copy.deepcopy(self.config_template)
         self.config.update(poor_yaml_read(self.file))
 
         # https://e.coding.net/onmyojiautoscript/oas/OnmyojiAutoScript.git
         # 2025.09.01 腾讯coding跑路了
-        if self.config["Repository"].startswith("https://e.coding.net/"):
+        if str(self.config.get("Repository") or "").startswith("https://e.coding.net/"):
             self.config["Repository"] = "https://gitcode.com/OnmyojiAutoScript/OnmyojiAutoScript.git"
 
         for key, value in self.config.items():

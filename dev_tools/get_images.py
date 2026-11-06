@@ -32,16 +32,19 @@ class GetAnimation(BaseTask):
         sho_timer = Timer(0.1)
         run_timer.start()
         sho_timer.start()
-        save_images = {}
+        # 用列表保存，而不是以毫秒时间戳为 key 的 dict：同一毫秒内截两张图时后者会覆盖前者
+        save_images = []
         while 1:
             if run_timer.reached():
                 break
+            # 循环内没有阻塞，原先会 100% 占满一个 CPU 核心
+            time.sleep(0.05)
             if sho_timer.reached():
                 sho_timer.reset()
                 image = self.device.screenshot_window_background()
                 # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 image = highlight(image)
                 time_now1 = int(time.time() * 1000)
-                save_images[time_now1] = image
-        for time_now, image in save_images.items():
-            cv2.imwrite(str(self.save_folder / f'all{time_now}.png'), image)
+                save_images.append((time_now1, image))
+        for index, (time_now, image) in enumerate(save_images):
+            cv2.imwrite(str(self.save_folder / f'all{time_now}_{index}.png'), image)

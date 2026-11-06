@@ -4,7 +4,9 @@ services:
         network_mode: host
         volumes:
             - '.:/app/OnmyojiAutoScript:rw'
-            - '/etc/localtime:/etc/localtime:ro'
+        environment:
+            # 用环境变量设置时区：/etc/localtime 在 Windows/macOS 上不存在，挂载会失败
+            TZ: Asia/Shanghai
         container_name: 'oas-env'
         image: 'oas-env'
         build:

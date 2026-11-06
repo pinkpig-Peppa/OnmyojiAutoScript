@@ -21,7 +21,8 @@ deb-src https://mirrors.cloud.tencent.com/debian/ bookworm-backports main non-fr
     "\
 > /etc/apt/sources.list\
  && apt update \
- && apt install -y git adb libgomp1 openssh-client \
+ && apt install -y --no-install-recommends git adb libgomp1 openssh-client \
+ && rm -rf /var/lib/apt/lists/* \
  && git config --global --add safe.directory '*' \
  && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
  && echo 'Asia/Shanghai' > /etc/timezone \
@@ -33,5 +34,6 @@ deb-src https://mirrors.cloud.tencent.com/debian/ bookworm-backports main non-fr
  && rm /tmp/requirements.txt \
  && rm -r ~/.cache/pip
 
-CMD python server.py
+# 用 exec 形式，保证 python 是 PID 1，能正确收到 SIGTERM 并返回退出码
+CMD ["python", "server.py"]
 #CMD /bin/bash

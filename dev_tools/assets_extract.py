@@ -400,10 +400,9 @@ class AssetsExtractor:
         imports.append('')  # blank line before class
 
         if result == '':
-            logger.error(f'There are no resource files under the {self.task_name} task')
-            self._result = '\n'.join(imports) + self.class_name + '\tpass'
-        else:
-            self._result = '\n'.join(imports) + self.class_name + result
+            logger.error(f'There are no resource files under the {self.task_name} task, skip writing assets.py')
+            return
+        self._result = '\n'.join(imports) + self.class_name + result
         self._result += '\n\n'
         self.write_file()
 

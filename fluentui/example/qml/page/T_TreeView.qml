@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Layouts
 import QtQuick.Window
 import QtQuick.Controls
@@ -69,21 +69,21 @@ FluScrollablePage {
                         text:"None"
                         onClicked: {
                             btn_selection_model.text = text
-                            tree_view.selectionMode = FluTabView.Equal
+                            tree_view.selectionMode = FluTreeView.None
                         }
                     },
                     FluMenuItem{
                         text:"Single"
                         onClicked: {
                             btn_selection_model.text = text
-                            tree_view.selectionMode = FluTabView.SizeToContent
+                            tree_view.selectionMode = FluTreeView.Single
                         }
                     },
                     FluMenuItem{
                         text:"Muiltple"
                         onClicked: {
                             btn_selection_model.text = text
-                            tree_view.selectionMode = FluTabView.Compact
+                            tree_view.selectionMode = FluTreeView.Multiple
                         }
                     }
                 ]

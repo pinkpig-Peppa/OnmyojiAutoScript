@@ -1,4 +1,4 @@
-﻿#include "FluApp.h"
+#include "FluApp.h"
 
 #include <QQmlEngine>
 #include <QGuiApplication>
@@ -8,6 +8,8 @@
 #include <QUuid>
 #include <QFontDatabase>
 #include <QClipboard>
+#include <QQmlComponent>
+#include <QDebug>
 #include "Def.h"
 #ifdef Q_OS_WIN
 #pragma comment(lib, "Dwmapi.lib")
@@ -39,6 +41,9 @@ FluApp::FluApp(QObject *parent)
 
 FluApp::~FluApp(){
     if (nativeEvent != Q_NULLPTR) {
+        if (qApp != Q_NULLPTR) {
+            qApp->removeNativeEventFilter(nativeEvent);
+        }
         delete nativeEvent;
         nativeEvent = Q_NULLPTR;
     }
@@ -62,9 +67,19 @@ void FluApp::setFluTools(FluTools* val){
 
 void FluApp::init(QQuickWindow *window){
     this->appWindow = window;
+    if (nativeEvent != Q_NULLPTR) {
+        // 已经初始化过，避免重复安装事件过滤器并泄漏旧对象
+        return;
+    }
     QQmlEngine *engine = qmlEngine(appWindow);
     QQmlComponent component(engine, ":/FluentUI/Controls/FluSingleton.qml");
-    component.create();
+    QObject *singleton = component.create();
+    if (singleton == Q_NULLPTR) {
+        qWarning("FluApp::init: 创建 FluSingleton 失败: %s", qPrintable(component.errorString()));
+    } else {
+        // 交给应用对象托管，避免这个单例对象泄漏
+        singleton->setParent(QCoreApplication::instance());
+    }
     nativeEvent = new NativeEventFilter();
     qApp->installNativeEventFilter(nativeEvent);
 }
@@ -84,6 +99,10 @@ void FluApp::navigate(const QString& route,const QJsonObject& argument,FluRegist
         return;
     }
     QQmlEngine *engine = qmlEngine(appWindow);
+    if (engine == Q_NULLPTR) {
+        qWarning("FluApp::navigate: qmlEngine 为空，请先调用 FluApp::init()");
+        return;
+    }
     QQmlComponent component(engine, routes().value(route).toString());
     QVariantMap properties;
     properties.insert("route",route);
@@ -113,6 +132,11 @@ void FluApp::navigate(const QString& route,const QJsonObject& argument,FluRegist
         }
     }
     view = qobject_cast<QQuickWindow*>(component.createWithInitialProperties(properties));
+    if(view == Q_NULLPTR){
+        qWarning("FluApp::navigate: 创建窗口失败 route=%s: %s", qPrintable(route),
+                 qPrintable(component.errorString()));
+        return;
+    }
     if(fluTheme->frameless()){
         view->setFlag(Qt::FramelessWindowHint,true);
     }
