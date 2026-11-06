@@ -20,7 +20,7 @@ class ProcessManager(DeployConfig):
     def iter_process_by_name(self, name):
         """
         Args:
-            name (str): process name, such as 'alas.exe'
+            name (str): process name, such as 'oas.exe'
 
         Yields:
             str, str, str: executable_path, process_name, process_id
@@ -61,7 +61,7 @@ class ProcessManager(DeployConfig):
             self.execute(f'taskkill /f /pid {row[2]}', allow_failure=True, output=False)
 
     def process_kill(self):
-        logger.hr(f'Kill existing Alas', 0)
+        logger.hr(f'Kill existing OAS', 0)
         self.kill_by_name('oas.exe')
         self.kill_by_name('python.exe')
         self.kill_by_name('pythonw.exe')
