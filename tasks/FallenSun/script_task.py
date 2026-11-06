@@ -47,7 +47,10 @@ class ScriptTask(GeneralBattle, GeneralInvite, GeneralBuff, GeneralRoom, GameUi,
             case UserStatus.LEADER: success = self.run_leader()
             case UserStatus.MEMBER: success = self.run_member()
             case UserStatus.ALONE: self.run_alone()
-            case UserStatus.WILD: self.run_wild()
+            case UserStatus.WILD:
+                # Wild 模式尚未实现，按失败处理
+                self.run_wild()
+                success = False
             case _: logger.error('Unknown user status')
 
         # 下一次运行时间

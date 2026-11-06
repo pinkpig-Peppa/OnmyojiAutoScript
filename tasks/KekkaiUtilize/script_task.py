@@ -85,7 +85,8 @@ class ScriptTask(GameUi, ReplaceShikigami, KekkaiUtilizeAssets):
             if not self.appear(self.I_UTILIZE_ADD):
                 remaining_time = self.O_UTILIZE_RES_TIME.ocr(self.device.image)
                 if not isinstance(remaining_time, timedelta):
-                    logger.warning('Ocr remaining time error')
+                    logger.warning('Ocr remaining time error, retry later')
+                    continue
                 logger.info(f'Utilize remaining time: {remaining_time}')
                 # 已经蹭上卡了，设置下次蹭卡时间  # 减少30秒
                 # remaining_time = remaining_time - timedelta(seconds=30)

@@ -47,6 +47,13 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
 class ScriptTask(BaseTask):
 
     def run(self):
+        # 统一收尾：无论正常结束、TaskEnd 还是异常，都清理 frida 子进程与大神 APP
+        try:
+            self._run_checkin()
+        finally:
+            self._cleanup(restore_game=True)
+
+    def _run_checkin(self):
         self.gl_uid = ""
         self.gl_token = ""
         self.gl_deviceid = ""

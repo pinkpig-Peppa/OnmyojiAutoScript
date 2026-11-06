@@ -142,9 +142,9 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
         third_order = self.rule.index(third_class) if third_class in self.rule else 102
         logger.info(f'first_class: {first_class}, second_class: {second_class}, third_class: {third_class}')
         logger.info(f'first_order: {first_order}, second_order: {second_order}, third_order: {third_order}')
-        if first_order < second_order and first_order < third_order:
-            best_index, best_class = 0, first_class
-        elif second_order < first_order and second_order < third_order:
+        # 默认选第一个任务，避免三种任务排序相同或全部未知时 best_class 未赋值导致 UnboundLocalError
+        best_index, best_class = 0, first_class
+        if second_order < first_order and second_order < third_order:
             best_index, best_class = 1, second_class
         elif third_order < first_order and third_order < second_order:
             best_index, best_class = 2, third_class
@@ -326,7 +326,11 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
         while 1:
             self.screenshot()
             number_text = self.O_SL_NUMBER.ocr(self.device.image)
-            submit_number = int(re.findall(r'\d+', number_text)[-1])
+            numbers = re.findall(r'\d+', number_text) if number_text else []
+            if not numbers:
+                logger.warning('Ocr submit number failed')
+                continue
+            submit_number = int(numbers[-1])
             if submit_number > 0:
                 break
 

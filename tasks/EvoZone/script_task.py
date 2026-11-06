@@ -53,7 +53,9 @@ class ScriptTask(GeneralBattle, GeneralInvite, GeneralBuff, GeneralRoom, GameUi,
             case UserStatus.ALONE:
                 self.run_alone()
             case UserStatus.WILD:
+                # Wild 模式尚未实现，按失败处理，避免误报成功
                 self.run_wild()
+                success = False
             case _:
                 logger.error('Unknown user status')
 
@@ -252,7 +254,10 @@ class ScriptTask(GeneralBattle, GeneralInvite, GeneralBuff, GeneralRoom, GameUi,
             elif self.check_take_over_battle(False, config=self.config.evo_zone.general_battle_config):
                 continue
 
+        # 退出循环必须每轮截图刷新画面，否则 appear 一直匹配旧帧，也不会触发 60s 卡死检测
+        exit_count = 0
         while 1:
+            self.screenshot()
             # 有一种情况是本来要退出的，但是队长邀请了进入的战斗的加载界面
             if self.appear(self.I_GI_HOME) or self.appear(self.I_GI_EXPLORE):
                 break
@@ -262,6 +267,10 @@ class ScriptTask(GeneralBattle, GeneralInvite, GeneralBuff, GeneralRoom, GameUi,
             # 如果还在战斗中，就退出战斗
             if self.exit_battle():
                 pass
+            exit_count += 1
+            if exit_count >= 15:
+                logger.warning('EvoZone exit timeout, force back to main')
+                break
 
         self.goto_page(page_main)
         return True

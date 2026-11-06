@@ -13,7 +13,7 @@ from cached_property import cached_property
 from module.atom.image import RuleImage
 from module.atom.ocr import RuleOcr
 from module.base.timer import Timer
-from module.exception import TaskEnd
+from module.exception import GameStuckError, TaskEnd
 from module.logger import logger
 from tasks.Component.Costume.config import MainType
 from tasks.Component.GeneralBattle.config_general_battle import GeneralBattleConfig
@@ -89,8 +89,8 @@ class ScriptTask(WQExplore, SecretScriptTask, WantedQuestsAssets):
                 logger.warning('failed too many times, exit')
                 break
             if self.current_count >= 30:
-                logger.error(f'current count {self.current_count} >= 20, exit')
-                raise Exception('current count >= 20, exit')
+                logger.error(f'current count {self.current_count} >= 30, exit')
+                raise GameStuckError(f'current count {self.current_count} >= 30, exit')
             cu, re, total, area = self.find_wq(self.device.image)
             logger.info(f"find_wq result: current {cu} remain {re} total {total} area {area}")
             if re == -2:
@@ -339,7 +339,7 @@ class ScriptTask(WQExplore, SecretScriptTask, WantedQuestsAssets):
         # sort
         info_wq_list.sort(key=lambda x: x[0])
         filtered = list(filter(lambda x: (x[5] == '秘闻' or x[5] == '式神') and x[2] >= 3, info_wq_list))
-        if not filtered and len(filtered) != 0:
+        if filtered:
             info_wq_list = filtered
         best_type, destination, once_number, goto_button, func, _ = info_wq_list[0]
         do_number = 1 if once_number >= num_want else num_want // once_number + (1 if num_want % once_number > 0 else 0)
@@ -372,6 +372,7 @@ class ScriptTask(WQExplore, SecretScriptTask, WantedQuestsAssets):
             # self.ui_click_until_disappear(self.I_WQSE_FIRE)
             # 又臭又长的对话针的是服了这个网易
             click_count = 0
+            force_close_count = 0
             while 1:
                 self.screenshot()
                 if not self.appear(self.I_UI_BACK_RED, threshold=0.7):
@@ -382,11 +383,16 @@ class ScriptTask(WQExplore, SecretScriptTask, WantedQuestsAssets):
                     self.click(self.C_SECRET_CHAT, interval=0.8)
                     click_count += 1
                     if click_count >= 6:
-                        logger.warning('Secret mission chat too long, force to close')
+                        force_close_count += 1
                         click_count = 0
                         self.device.click_record_clear()
+                        if force_close_count >= 3:
+                            logger.error('Secret mission chat still not finished after 3 force closes, give up')
+                            return False
+                        logger.warning('Secret mission chat too long, force to close')
                     continue
             success = self.run_general_battle(self.battle_config)
+        secret_back_timer = Timer(60).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_CHECK_SECRET_ZONES):
@@ -395,6 +401,9 @@ class ScriptTask(WQExplore, SecretScriptTask, WantedQuestsAssets):
                 continue
             if self.appear_then_click(self.I_UI_BACK_BLUE, interval=1.5):
                 continue
+            if secret_back_timer.reached():
+                logger.warning('Cannot back to secret zones within 60s')
+                break
         self.goto_page(page_exploration)
         self.wait_until_stable(self.I_CHECK_EXPLORATION)
         logger.info('Secret mission finished')

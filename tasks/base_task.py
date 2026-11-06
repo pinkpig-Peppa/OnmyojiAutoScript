@@ -346,7 +346,7 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         :param target:
         :return:
         """
-        if not self.wait_until_appear(target, wait_time):
+        if not self.wait_until_appear(target, wait_time=wait_time):
             return False
         click_x, click_y = target.coord()
         if action is None:
@@ -357,10 +357,21 @@ class BaseTask(GlobalGameAssets, CostumeBase):
             self.device.click(click_x, click_y, control_name=target.name)
         return True
 
-    def wait_until_disappear(self, target: RuleImage) -> None:
+    def wait_until_disappear(self, target: RuleImage, wait_time: int = None) -> None:
+        """
+        等待目标消失
+        :param wait_time: 超时时间(秒)，None 表示不限制
+        """
+        wait_timer = None
+        if wait_time:
+            wait_timer = Timer(wait_time)
+            wait_timer.start()
         while 1:
             self.screenshot()
             if not self.appear(target):
+                break
+            if wait_timer and wait_timer.reached():
+                logger.warning(f'Wait disappear timeout: {target.name}')
                 break
 
     def wait_until_pos_stable(self, target: RuleImage, stable_time: float = 0.3, timeout: float = 2,

@@ -242,6 +242,7 @@ class ScriptTask(GameUi, GeneralInvite, GeneralRoom, BondlingBattle, SwitchSoul,
                 self.device.stuck_record_add('BATTLE_STATUS_S')
                 continue
 
+        exit_timer = Timer(30).start()
         while 1:
             # 有一种情况是本来要退出的，但是队长邀请了进入的战斗的加载界面
             if self.appear(self.I_GI_HOME) or self.appear(self.I_GI_EXPLORE) or self.appear(self.I_BALL_AREA) or self.appear(self.I_BALL_HELP) :
@@ -252,6 +253,10 @@ class ScriptTask(GameUi, GeneralInvite, GeneralRoom, BondlingBattle, SwitchSoul,
             # 如果还在战斗中，就退出战斗
             if self.exit_battle():
                 pass
+            # 退出房间/战斗都失败时不能无限循环
+            if exit_timer.reached():
+                logger.warning('Cannot exit room/battle within 30s, force leave')
+                break
                 # 引用配置
         if UserStatus.MEMBER == self.config.bondling_fairyland.bondling_config.user_status:
             self.goto_page(page_main)
@@ -308,12 +313,17 @@ class ScriptTask(GameUi, GeneralInvite, GeneralRoom, BondlingBattle, SwitchSoul,
                 break
 
         # 退出的时候如果是在结契的界面，要退回到探查界面
+        back_timer = Timer(10).start()
         while 1:
             self.screenshot()
             if self.in_search_ui():
                 break
             if self.in_catch_ui():
                 self.appear_then_click(self.I_BACK_Y, interval=1)
+                continue
+            if back_timer.reached():
+                logger.warning('Cannot return to search ui within 10s, force exit')
+                break
         logger.info('BondlingFairyland task finished')
 
         self.goto_page(page_main)
@@ -344,8 +354,9 @@ class ScriptTask(GameUi, GeneralInvite, GeneralRoom, BondlingBattle, SwitchSoul,
             if not self.appear(self.I_STONE_SURE):
                 sleep(random.uniform(1.5, 2))  # 等待购买后的动画, 否则已经买了但是下次再点击还会出现该界面
                 return True
+            cnt += 1
             if cnt >= 6:
-                logger.warning("")
+                logger.warning('使用鸣契石召唤契灵失败：多次点击后仍停留在购买界面')
                 return False
             for i in range(3):
                 if self.appear_then_click(self.I_BUY_PLUS, interval=1):
@@ -354,6 +365,8 @@ class ScriptTask(GameUi, GeneralInvite, GeneralRoom, BondlingBattle, SwitchSoul,
                 continue
             if self.appear_then_click(self.I_STONE_SURE, interval=2):
                 continue
+            # 没有任何可点击项时也要限速，避免空转
+            sleep(1)
 
 
     def run_search(self, bondling_config: BondlingConfig, limit_cnt: int = None):
@@ -496,7 +509,8 @@ class ScriptTask(GameUi, GeneralInvite, GeneralRoom, BondlingBattle, SwitchSoul,
                 4: self.C_STONE_4,
                 5: self.C_STONE_5,
             }
-            return match[(ind - 1) % 4 + 1]
+            # 序号 5 也有对应的球，取不到时回退到 1 号球
+            return match.get(ind, match[1])
 
         click_target = get_click_target(index)
         click_count = 0
@@ -781,11 +795,11 @@ class ScriptTask(GameUi, GeneralInvite, GeneralRoom, BondlingBattle, SwitchSoul,
 
     @cached_property
     def general_battle_config(self):
-        gbc = GeneralBattleConfig()
+        # 从任务配置复制，保留用户对绿标/随机点击等可见项的设置；
+        # 结契战斗必须锁定队伍并禁用预设阵容（这两项在 BattleConfig 中是隐藏字段）
+        gbc = self.config.bondling_fairyland.battle_config.model_copy(deep=True)
         gbc.lock_team_enable = True
         gbc.preset_enable = False
-        gbc.green_enable = False
-        gbc.random_click_swipt_enable = False
         return gbc
 
     def switch_soul(self):

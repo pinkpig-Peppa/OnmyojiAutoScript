@@ -6,14 +6,12 @@
 import random
 import re
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from time import sleep
 
 import cv2
 import numpy as np
 from cached_property import cached_property
-from future.backports.datetime import datetime
-from sympy.plotting.intervalmath import interval
 
 from module.atom.click import RuleClick
 from module.atom.gif import RuleGif
@@ -103,6 +101,10 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
 
         # 是否已击败馆主第一阵容
         first_master_killed = False
+        # 无进展分支的连续循环计数，作为终止条件（避免死循环）
+        fighting_count = 0
+        unknown_scene_count = 0
+        last_unknown_scene = None
         # 开始道馆流程
         while is_dokan_activated:
             self.screenshot()
@@ -113,6 +115,8 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
 
             # 检测到不在道馆场景, 则等待2秒再继续循环
             if not in_dokan:
+                unknown_scene_count = 0
+                last_unknown_scene = None
                 if not out_dokan_timer.started():
                     out_dokan_timer.start()
                 if out_dokan_timer.reached():
@@ -275,7 +279,16 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
             # 场景状态：战斗中，左上角的加油图标
             if current_scene == DokanScene.RYOU_DOKAN_SCENE_FIGHTING:
                 logger.info("Battle undergoing")
+                fighting_count += 1
+                # 单场战斗最多等待约 600 个循环（每次 sleep 2s），避免战斗卡死时无限空转
+                if fighting_count >= 300:
+                    logger.warning(
+                        f'Dokan battle not finished after {fighting_count} loops (~{fighting_count * 3}s), exit'
+                    )
+                    break
+                sleep(2)
                 continue
+            fighting_count = 0
             # 投票 是否放弃突破   放弃/继续
             if current_scene == DokanScene.RYOU_DOKAN_SCENE_ABANDON_VOTE:
                 # 一般来说,都是点放弃
@@ -302,6 +315,17 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
                 break
 
             logger.info(f"scene Without handler, skipped")
+            # 只对“连续同一个未知场景”计数，避免已知场景循环后误累计
+            if current_scene != last_unknown_scene:
+                last_unknown_scene = current_scene
+                unknown_scene_count = 0
+            unknown_scene_count += 1
+            if unknown_scene_count >= 60:
+                logger.warning(
+                    f'Dokan scene {current_scene} has no handler after {unknown_scene_count} loops, exit'
+                )
+                break
+            sleep(1)
 
             # 防封，随机移动，随机点击（安全点击），随机时延
             # if not self.anti_detect(True, True, True):
@@ -526,21 +550,24 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
     def goto_dokan_scene(self):
         # 截图速度太快会导致在道馆-神社之间一直循环无法退出,故设置截图间隔
         self.device.screenshot_interval_set(0.3)
-        while 1:
-            self.screenshot()
-            in_dokan, cur_scene = self.get_current_scene()
-            if in_dokan:
-                break
-            if cur_scene == DokanScene.RYOU_DOKAN_RYOU:
-                self.ui_click_until_disappear(self.I_RYOU_SHENSHE)
-                continue
-            if cur_scene == DokanScene.RYOU_DOKAN_SHENSHE:
-                self.ui_click_until_disappear(self.I_RYOU_DOKAN, interval=1)
-                continue
-            if not in_dokan:
-                self.goto_page(page_guild)
-                continue
-        self.device.screenshot_interval_set()
+        try:
+            while 1:
+                self.screenshot()
+                in_dokan, cur_scene = self.get_current_scene()
+                if in_dokan:
+                    break
+                if cur_scene == DokanScene.RYOU_DOKAN_RYOU:
+                    self.ui_click_until_disappear(self.I_RYOU_SHENSHE)
+                    continue
+                if cur_scene == DokanScene.RYOU_DOKAN_SHENSHE:
+                    self.ui_click_until_disappear(self.I_RYOU_DOKAN, interval=1)
+                    continue
+                if not in_dokan:
+                    self.goto_page(page_guild)
+                    continue
+        finally:
+            # 异常/打断时也要恢复截图间隔，否则会影响后续任务
+            self.device.screenshot_interval_set()
         return True
 
     def enter_dokan(self):
@@ -760,18 +787,23 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
        返回一个包含所有匹配项目信息的列表。
        """
         res_list = []
-        while 1:
-            if (item.roi_back[0] + item.roi_back[2] > (1280 + offset[2])) or (
-                    item.roi_back[1] + item.roi_back[3] > (720 + offset[3])):
-                break
-            if self.appear(item):
-                res_list.append(item.roi_front.copy())
-                # 刷新搜索区域,使用上个搜索结果的Y坐标作为起始点的Y坐标,搜索结果的高度作为起始搜索高度
-                item.roi_back = self.position_offset(item.roi_back, (
-                    0, item.roi_front[1] + item.roi_front[3] - item.roi_back[1], 0,
-                    item.roi_front[3] - item.roi_back[3]),
-                                                     )
-            item.roi_back = self.position_offset(item.roi_back, offset)
+        # 查找过程中会临时移动共享资产的 roi_back，返回/异常时必须恢复
+        origin_roi_back = item.roi_back.copy()
+        try:
+            while 1:
+                if (item.roi_back[0] + item.roi_back[2] > (1280 + offset[2])) or (
+                        item.roi_back[1] + item.roi_back[3] > (720 + offset[3])):
+                    break
+                if self.appear(item):
+                    res_list.append(item.roi_front.copy())
+                    # 刷新搜索区域,使用上个搜索结果的Y坐标作为起始点的Y坐标,搜索结果的高度作为起始搜索高度
+                    item.roi_back = self.position_offset(item.roi_back, (
+                        0, item.roi_front[1] + item.roi_front[3] - item.roi_back[1], 0,
+                        item.roi_front[3] - item.roi_back[3]),
+                                                         )
+                item.roi_back = self.position_offset(item.roi_back, offset)
+        finally:
+            item.roi_back = origin_roi_back
         return res_list
 
     def start_cheering(self):

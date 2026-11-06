@@ -16,6 +16,7 @@ from oashya.tracker import Tracker
 from oashya.labels import label2id, CLASSINDEX as CI, id2name
 from oashya.utils import draw_tracks
 
+from module.base.timer import Timer
 from module.exception import TaskEnd
 from module.logger import logger
 from module.exception import RequestHumanTakeover
@@ -111,7 +112,7 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
         hya_interval = debug_config.hya_interval
         hya_save_result = debug_config.hya_save_result
         if hya_interval <= 100 or hya_interval >= 1000:
-            raise RequestHumanTakeover('screenshot_interval must be between 1000 and 10000')
+            raise RequestHumanTakeover('screenshot_interval must be between 100 and 1000')
         self.set_fast_screenshot_interval(hya_interval)
         return Debugger(info_enable=debug_config.hya_info, 
                         continuous_learning=debug_config.continuous_learning,
@@ -140,12 +141,14 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
             logger.info(f'count: {hya_count}/{self.limit_count}')
             logger.info(f'time: {(datetime.now() - self.start_time).total_seconds():.1f}s/{self.limit_time.total_seconds()}s')
 
+        exit_timer = Timer(30).start()
         while 1:
             self.screenshot()
 
-            if not self.appear(self.I_HACCESS):
-                continue
-            if self.appear(self.I_HCLOSE_RED):
+            if self.appear(self.I_HCLOSE_RED) and self.appear(self.I_HACCESS):
+                break
+            if exit_timer.reached():
+                logger.warning('Cannot find access/close button within 30s, force exit')
                 break
         self.ui_click_until_disappear(self.I_HCLOSE_RED)
         self.set_next_run(task='Hyakkiyakou', success=True, finish=False)
@@ -198,8 +201,8 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
                 best_class = _class
         if best_class != -1:
             logger.info(
-                f'Hyakki select: detect {id2name(_class)} '
-                f'with rarity score {score}'
+                f'Hyakki select: detect {id2name(best_class)} '
+                f'with rarity score {best_score}'
             )
         else:
             logger.warning('Hyakki select: no valid shikigami detected on title screen')
@@ -278,8 +281,8 @@ class ScriptTask(GameUi, HyaSlave, SwitchOnmyoji):
             #修改：在这里不再区分freeze，而是将状态传到decision用于执行冻结策略
             #目前被禁用了 因为冰冻状态下检测正确率约等于0 全是蝉冰雪女 =.=
             if not self.appear(self.I_HFREEZE):
-                # -------------------------------------------------------
-                freeze = self.appear(self.I_HFREEZE)
+                # 冰冻状态已在条件里排除，此分支中 freeze 必然为 False
+                freeze = False
                 self.slave_state = self.update_state()
                 tracks = self.tracker(image=self.device.image, response=last_action)
                 last_action = self.agent.decision(tracks=tracks, state=self.slave_state, freeze=freeze)

@@ -242,34 +242,17 @@ class GameUi(BaseTask, GameUiAssets):
             return None
 
         self.maybe_screenshot(skip_first_screenshot)
-        GameUi._prepare_page_rule_image_cache(self, pages)
         indexed_candidates = [(index, page) for index, page in enumerate(pages) if self.match_page_once(page)]
         if not indexed_candidates:
             return None
 
         self.screenshot()
-        GameUi._prepare_page_rule_image_cache(self, [page for _, page in indexed_candidates])
         for page in sort_pages_by_priority(indexed_candidates):
             if self.match_page_once(page):
                 self.navigator.current_page = page
                 logger.attr("UI", page.name)
                 return page
         return None
-
-    def _prepare_page_rule_image_cache(self, pages: list[Page]) -> None:
-        targets = []
-        seen = set()
-        for page in pages:
-            if page.recognizer is None:
-                continue
-            for target in collect_rule_images(page.recognizer):
-                cache_key = id(target)
-                if cache_key in seen:
-                    continue
-                seen.add(cache_key)
-                targets.append(target)
-        if targets and hasattr(self, "prepare_appear_cache"):
-            self.prepare_appear_cache(targets)
 
     @staticmethod
     def _action_name(action) -> str:
@@ -526,21 +509,29 @@ class GameUi(BaseTask, GameUiAssets):
             and self.confirm_page(source, skip_first_screenshot=False)
         ):
             x, y, width, height = transition.action.roi_front
-            click_x = x + width // 2
-            click_y = y + height // 2
-            logger.warning(
-                "Town target was not recognized; use one fixed-position "
-                f"fallback click: action={self._action_name(transition.action)}, "
-                f"position=({click_x}, {click_y})"
-            )
-            self.device.click(
-                x=click_x,
-                y=click_y,
-                control_name=(
-                    f"TOWN_FALLBACK_{self._action_name(transition.action)}"
-                ),
-            )
-            action_done = True
+            if width <= 0 or height <= 0:
+                # roi_front 只在模板匹配成功时才被写回；此处的 (0, 0, 0, 0)
+                # 表示没有可用坐标，盲目点击会点到屏幕左上角。
+                logger.warning(
+                    "Town fallback skipped: no matched roi_front for "
+                    f"action={self._action_name(transition.action)}"
+                )
+            else:
+                click_x = x + width // 2
+                click_y = y + height // 2
+                logger.warning(
+                    "Town target was not recognized; use one fixed-position "
+                    f"fallback click: action={self._action_name(transition.action)}, "
+                    f"position=({click_x}, {click_y})"
+                )
+                self.device.click(
+                    x=click_x,
+                    y=click_y,
+                    control_name=(
+                        f"TOWN_FALLBACK_{self._action_name(transition.action)}"
+                    ),
+                )
+                action_done = True
 
         if not action_done:
             self._run_hooks(source.on_leave_failure)
@@ -731,23 +722,9 @@ class GameUi(BaseTask, GameUiAssets):
                 return True
         self._record_unknown_close_event(f"None")
 
-        @run_once
-        def app_check():
-            if not self.device.app_is_running():
-                raise GameNotRunningError("Game not running")
-
-        @run_once
-        def minicap_check():
-            if self.config.script.device.control_method == "uiautomator2":
-                self.device.uninstall_minicap()
-
-        @run_once
-        def rotation_check():
-            self.device.get_orientation()
-
-        app_check()
-        minicap_check()
-        rotation_check()
+        _app_check_once(self)
+        _minicap_check_once(self)
+        _rotation_check_once(self)
         return False
 
     def _finalize_arrival(self, destination: Page, confirm_wait: float, start_time: float) -> bool:
@@ -793,7 +770,14 @@ class GameUi(BaseTask, GameUiAssets):
         destination = self.navigator.resolve_page(destination) or self.navigator.add_page(destination)
         logger.hr(f"UI goto {destination}")
         start_time = time.time()
+        # 幂等键只用于同一次导航内部的去重；每次显式导航都应重新执行当前页的
+        # 进入清理 hook，否则第二次 goto 同一页面时页面弹窗不会被处理。
+        self.navigator.last_enter_success_page_key = None
         progress_timer = Timer(timeout).start()
+        # progress_timer 会被“页面变化 / 路径变化 / 关弹窗成功 / 单边成功”反复重置，
+        # 页面来回震荡（每步都成功但到不了目标）时永远不会超时。
+        # 这里再维护一个不会重置的硬上限，保证 goto_page 一定能退出。
+        hard_deadline = time.time() + max(timeout * 3, 120)
         last_progress_signature: tuple[str, str] | None = None
         last_detected_page_key: str | None = None
         repeated_failure_transition_key: str | None = None
@@ -806,6 +790,18 @@ class GameUi(BaseTask, GameUiAssets):
             repeated_failure_count = 0
 
         while True:
+            if time.time() > hard_deadline:
+                logger.warning(
+                    f"Navigation hard timeout ({max(timeout * 3, 120):.0f}s) reached, "
+                    f"current={last_detected_page_key}, destination={destination.key}"
+                )
+                self._log_navigation_timeout(
+                    destination,
+                    last_path_signature=last_progress_signature,
+                    repeated_failure_transition_key=repeated_failure_transition_key,
+                    repeated_failure_count=repeated_failure_count,
+                    last_repeated_failure_close_result=last_repeated_failure_close_result,
+                )
             current = self._refresh_current_page(destination, skip_first_screenshot)
             skip_first_screenshot = False
 
@@ -823,7 +819,6 @@ class GameUi(BaseTask, GameUiAssets):
                         repeated_failure_count=repeated_failure_count,
                         last_repeated_failure_close_result=last_repeated_failure_close_result,
                     )
-                    raise GamePageUnknownError(f"Cannot goto page[{destination}]")
                 continue
 
             if current.key != last_detected_page_key:
@@ -893,4 +888,23 @@ class GameUi(BaseTask, GameUiAssets):
                     repeated_failure_count=repeated_failure_count,
                     last_repeated_failure_close_result=last_repeated_failure_close_result,
                 )
-                raise GamePageUnknownError(f"Cannot goto page[{destination}]")
+
+
+# 以下检查是“进程内只做一次”的动作，必须定义在模块层：
+# run_once 的执行标记挂在包装函数对象上，若在函数体内定义，
+# 每次调用都会重新创建包装函数，装饰器完全失效（minicap 曾被反复卸载）。
+@run_once
+def _app_check_once(task: "GameUi") -> None:
+    if not task.device.app_is_running():
+        raise GameNotRunningError("Game not running")
+
+
+@run_once
+def _minicap_check_once(task: "GameUi") -> None:
+    if task.config.script.device.control_method == "uiautomator2":
+        task.device.uninstall_minicap()
+
+
+@run_once
+def _rotation_check_once(task: "GameUi") -> None:
+    task.device.get_orientation()
