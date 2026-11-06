@@ -118,7 +118,10 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
                     if self.appear(self.I_JADE_50):
                         self.ui_click_until_smt_disappear(self.I_DE_FIND, self.I_JADE_50, interval=1)
                         continue
-                    if not self.appear_then_click(search_button, interval=2):
+                    if self.appear(search_button):
+                        # appear_then_click 返回 False 只代表 interval 未到，不能据此判定按钮不存在
+                        self.appear_then_click(search_button, interval=2)
+                    else:
                         raise GameStuckError(f'Cannot find {boss_name} search button')
                     logger.info(
                         f'Finding {boss_name}, attempt {search_attempt}/3 '
@@ -209,8 +212,7 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
         while True:
             if fail_count >= 5:
                 return
-            if not find_boss():
-                continue
+            find_boss()
             if enter_boss():
                 break
             fail_count += 1
@@ -218,7 +220,8 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
         logger.info('Boss battle confirm and enter')
         # 等待挑战, 5秒也是等
         time.sleep(5)
-        # 延长时间并在战斗结束后改回来
+        # 延长时间并在战斗结束后恢复成原来的计时器（不硬编码超时值）
+        origin_stuck_timer_long = self.device.stuck_timer_long
         self.device.stuck_timer_long = Timer(480, count=480).start()
         preset_switched = False
         while True:
@@ -253,10 +256,11 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
             logger.info('Unknown scene Or Boss fight failed.waiting for Prepare_Button appear...')
             self.wait_until_appear(self.I_PREPARE_HIGHLIGHT, wait_time=2)
 
-        self.device.stuck_timer_long = Timer(300, count=300).start()
+        self.device.stuck_timer_long = origin_stuck_timer_long
 
         # 等待回到挑战boss主界面
         self.wait_until_appear(self.I_BOSS_GATHER)
+        back_timer = Timer(30).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_DE_LOCATION):
@@ -265,6 +269,9 @@ class ScriptTask(GameUi, GeneralBattle, DemonEncounterAssets, SwitchSoul):
                 continue
             if self.appear_then_click(self.I_BOSS_BACK_WHITE, interval=1):
                 continue
+            if back_timer.reached():
+                logger.warning('Cannot back to demon encounter main page within 30s')
+                break
         # 返回到封魔主界面
 
     def execute_lantern(self):

@@ -10,9 +10,11 @@ from typing import Union
 
 """GameUi 全局页面定义。"""
 
+import copy
 import random
 
 from module.atom.click import RuleClick
+from module.logger import logger
 from tasks.Component.GeneralBattle.assets import GeneralBattleAssets
 from tasks.GlobalGame.assets import GlobalGameAssets
 from tasks.GameUi.assets import GameUiAssets
@@ -42,7 +44,13 @@ def random_click(
 
     click_area_list = [GeneralBattleAssets.C_RANDOM_LEFT, GeneralBattleAssets.C_RANDOM_TOP,
                        GeneralBattleAssets.C_RANDOM_RIGHT, GeneralBattleAssets.C_RANDOM_BOTTOM]
-    click = random.choice([item for item, enabled in zip(click_area_list, ltrb) if enabled])
+    enabled_click_list = [item for item, enabled in zip(click_area_list, ltrb) if enabled]
+    if not enabled_click_list:
+        # ltrb 全部为 False 时 random.choice([]) 会抛 IndexError，回退到左侧安全区域
+        logger.warning('random_click: no click area enabled by ltrb, fallback to left area')
+        enabled_click_list = [click_area_list[0]]
+    # 复制后再改名，避免污染 GeneralBattleAssets 中的共享点击资产
+    click = copy.copy(random.choice(enabled_click_list))
     click.name = "SAFE_RANDOM_CLICK"
     if low is None or high is None:
         return click
@@ -258,7 +266,7 @@ page_area_boss.connect(page_exploration, GlobalGameAssets.I_UI_BACK_YELLOW, key=
 page_exploration.connect(page_area_boss, GameUiAssets.I_EXPLORATION_GOTO_AREA_BOSS, key="page_exploration->page_area_boss")
 
 page_heian_kitan = Page(GameUiAssets.I_CHECK_HEIAN_KITAN, category="global")
-page_heian_kitan.connect(page_exploration, GameUiAssets.I_CHECK_HEIAN_KITAN, key="page_heian_kitan->page_exploration")
+page_heian_kitan.connect(page_exploration, GlobalGameAssets.I_UI_BACK_YELLOW, key="page_heian_kitan->page_exploration")
 page_exploration.connect(page_heian_kitan, GameUiAssets.I_EXPLORATION_GOTO_HEIAN_KITAN, key="page_exploration->page_heian_kitan")
 
 

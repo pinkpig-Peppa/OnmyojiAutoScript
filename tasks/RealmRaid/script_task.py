@@ -26,6 +26,9 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
     medal_grid: ImageGrid = None
 
     def run(self):
+        # 勋章网格必须在使用前初始化，否则 medal_fire 中 find_anyone 会因 None 抛 AttributeError
+        self.medal_grid = ImageGrid([self.I_MEDAL_5, self.I_MEDAL_4, self.I_MEDAL_3,
+                                     self.I_MEDAL_2, self.I_MEDAL_1, self.I_MEDAL_0])
         self.run_2()
 
     def is_ticket(self) -> bool:
@@ -304,7 +307,8 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
 
         if total == 0:
             self.reward_detect_click(True)
-            # 增加出现聊天框遮挡，处理奖励之后，重新识别票数
+            # 增加出现聊天框遮挡，处理奖励之后，重新截图再识别票数
+            self.screenshot()
             cu, res, total = self.O_NUMBER.ocr(self.device.image)
         if cu == 0 and cu + res == total:
             logger.warning(f'Execute raid failed, no ticket')
@@ -328,7 +332,7 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
         }
         order = order_attack.replace(' ', '').replace('\n', '')
         order = re.split(r'>', order)
-        order = [int(i) for i in order]
+        order = [int(i) for i in order if i.isdigit()]
         order = [i for i in order if i in support_number]
 
         images = []
@@ -479,7 +483,8 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
         retry_clean = 0
         while not self.appear(self.I_RR_PERSON):
             if retry_clean > 20:
-                logger.warning("Stuck too long, try force quit or random click")
+                logger.warning("Stuck too long, stop this round")
+                return False
             
             logger.info("Title not found! Checking for popups or rewards...")
             

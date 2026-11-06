@@ -45,7 +45,6 @@ class BaseExploration(GameUi, GeneralBattle, GeneralRoom, GeneralInvite, Replace
 
     @cached_property
     def _config(self):
-        self.config.exploration.general_battle_config.lock_team_enable = True
         limit_time = self.config.exploration.exploration_config.limit_time
         self.limit_time: timedelta = timedelta(
             hours=limit_time.hour,
@@ -53,6 +52,13 @@ class BaseExploration(GameUi, GeneralBattle, GeneralRoom, GeneralInvite, Replace
             seconds=limit_time.second
         )
         return self.config.model.exploration
+
+    @cached_property
+    def _general_battle_config(self):
+        # 探索战斗必须锁定队伍；只在副本上设置，避免改写并持久化用户配置
+        gbc = self.config.exploration.general_battle_config.model_copy(deep=True)
+        gbc.lock_team_enable = True
+        return gbc
 
     @cached_property
     def _match_end(self):
@@ -173,8 +179,11 @@ class BaseExploration(GameUi, GeneralBattle, GeneralRoom, GeneralInvite, Replace
             time.sleep(1)
 
         # 选中对应章节
+        select_timer = Timer(30).start()
         while 1:
             self.screenshot()
+            if select_timer.reached():
+                raise GameStuckError('Cannot select exploration chapter within 30s')
             if self.appear_then_click(self.I_UI_CONFIRM, interval=1):
                 continue
             if self.appear_then_click(self.I_UI_CONFIRM_SAMLL, interval=1):
@@ -392,6 +401,7 @@ class BaseExploration(GameUi, GeneralBattle, GeneralRoom, GeneralInvite, Replace
         self.device.click_record_remove(self.S_SWIPE_BACKGROUND_RIGHT.name)
         boss_timer = Timer(15)
         boss_timer.start()
+        boss_timeout_count = 0
         # click_yellow_button = 0 #用于保证只点一次左上返回按钮，不要直接触发连点回到主界面
         
         while 1:
@@ -411,6 +421,10 @@ class BaseExploration(GameUi, GeneralBattle, GeneralRoom, GeneralInvite, Replace
                 continue
 
             if boss_timer.reached():
+                boss_timeout_count += 1
+                if boss_timeout_count > 3:
+                    logger.error('Cannot quit exploration after 4 force attempts, give up')
+                    return False
                 logger.warning('Exit timeout, force clicking back button')
                 boss_timer.reset()
                 self.click(self.I_UI_BACK_BLUE)
@@ -432,6 +446,8 @@ class BaseExploration(GameUi, GeneralBattle, GeneralRoom, GeneralInvite, Replace
                     continue
             
             if self.appear(self.I_EXPLORATION_TITLE) or self.appear(self.I_CHECK_EXPLORATION):
+                # 此状态没有对应动作，限速避免全速空转
+                time.sleep(1)
                 continue
 
     def _hook_special_reward(self) -> bool:
@@ -450,7 +466,7 @@ class BaseExploration(GameUi, GeneralBattle, GeneralRoom, GeneralInvite, Replace
             # 如果还在探索说明，这个是显示滑动导致挑战按钮不在范围内
             logger.warning('Fire button disappear, but still in exploration')
             return False
-        self.run_general_battle(self._config.general_battle_config)
+        self.run_general_battle(self._general_battle_config)
         self.minions_cnt += 1
         return True
 
@@ -460,10 +476,14 @@ class BaseExploration(GameUi, GeneralBattle, GeneralRoom, GeneralInvite, Replace
         https://github.com/runhey/OnmyojiAutoScript/issues/1588
         @return:
         """
+        stable_timer = Timer(60).start()
         while 1:
             scene = self.get_current_scene(reuse_screenshot=False)
             if scene == Scene.WORLD and self.appear(self.I_EXP_ARROW_RIGHT):
                 return True
+            if stable_timer.reached():
+                logger.warning('World scene not stable within 60s')
+                return False
             if scene == Scene.ENTRANCE:
                 logger.warning('World scene unstable, possibly transient frame after paper doll collection')
                 return False

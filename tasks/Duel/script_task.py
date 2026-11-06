@@ -189,7 +189,7 @@ class ScriptTask(GameUi, GeneralBattle, SwitchSoul, DuelAssets, SwitchOnmyoji):
             if battle_timeout_cnt >= max_timeout_cnt:
                 logger.warning('Duel battle timeout[>15 minutes], exit')
                 self.duel_exit_battle()
-                continue
+                break
             if ret is None and not battle_operated:  # 进行战斗前的操作
                 # https://github.com/runhey/OnmyojiAutoScript/pull/1934
                 self.ui_click(self.O_D_HAND, self.O_D_AUTO, interval=6, timeout=45)

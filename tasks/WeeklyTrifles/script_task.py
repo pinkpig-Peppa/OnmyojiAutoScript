@@ -307,6 +307,7 @@ class ScriptTask(GameUi, WeeklyTriflesAssets):
                 timeout_timer = Timer(5).start()
                 # 随机点击直到再次召唤出现或者超时
                 while not timeout_timer.reached():
+                    self.screenshot()
                     if not self.click(random_click(), interval=0.8):
                         continue
                     self.screenshot()

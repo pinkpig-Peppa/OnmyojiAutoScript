@@ -487,6 +487,9 @@ class ScriptTask(GeneralBattle, GeneralInvite, GeneralBuff, GeneralRoom, GameUi,
             case Layer.THIRTEEN:
                 group_team = orochi_switch_soul.thirteen_switch
 
+        if group_team is None:
+            logger.warning(f'Unknown layer for switch soul: {layer}')
+            return
         if orochi_switch_soul.auto_switch_soul:
             self.goto_page(page_shikigami_records)
             self.run_switch_soul(group_team)

@@ -345,6 +345,7 @@ class ScriptTask(StateMachine, GameUi, Battle, BaseActivity, SwitchSoul, Activit
         更新前请先看 ./README.md
         """
         logger.hr(f'Start run climb type AP100')
+        logger.warning('AP100 climb type is not implemented, skip this round')
 
     def start_battle(self):
         click_times, max_times = 0, random.randint(4, 8)

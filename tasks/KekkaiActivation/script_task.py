@@ -129,6 +129,11 @@ class ScriptTask(KU, KekkaiActivationAssets):
             if card_status and card_effect:
                 logger.info('Card is using')
                 interval = self.ocr_time()
+                if interval is None:
+                    logger.warning('Get remaining time failed, retry later')
+                    self.set_next_run("KekkaiActivation", success=False,
+                                      target=datetime.now() + timedelta(minutes=10))
+                    return False
                 self.set_next_run("KekkaiActivation", target=interval+datetime.now())
                 return False
             # 如果已经选中这张卡了， 那就激活这张卡
@@ -144,6 +149,11 @@ class ScriptTask(KU, KekkaiActivationAssets):
                     if self.appear_then_click(self.I_A_ACTIVATE_YELLOW, interval=1):
                         continue
                 interval = self.ocr_time(True)
+                if interval is None:
+                    logger.warning('Get remaining time failed, retry later')
+                    self.set_next_run("KekkaiActivation", success=False,
+                                      target=datetime.now() + timedelta(minutes=10))
+                    return False
                 self.set_next_run("KekkaiActivation", target=interval + datetime.now())
                 return True
             # 如果是什么都没有，那就是可以开始挂卡了

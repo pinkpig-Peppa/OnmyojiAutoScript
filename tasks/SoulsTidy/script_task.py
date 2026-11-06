@@ -155,7 +155,8 @@ class ScriptTask(GameUi, SoulsTidyAssets):
                     logger.warning('Gold amount not int, skip')
                     continue
                 if gold_amount == 0:
-                    continue
+                    logger.warning('Gold is not enough, stop bongna')
+                    break
 
                 # 点击奉纳收取奖励
                 if not self.appear(self.I_ST_DONATE):

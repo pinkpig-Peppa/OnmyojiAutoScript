@@ -175,7 +175,7 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, AbyssShadowsAssets):
                                                               lambda: self.switch_area())
 
                 # 检查是否已完成所有任务
-                print(f"Current fight times: boss {self.boss_fight_count} times, general {self.general_fight_count} times, elite {self.elite_fight_count} times")
+                logger.info(f"Current fight times: boss {self.boss_fight_count} times, general {self.general_fight_count} times, elite {self.elite_fight_count} times")
                 if self.boss_fight_count >= 2 and self.general_fight_count >= 4 and self.elite_fight_count >= 6:
                     logger.info("All fights completed")
                     success = True
@@ -198,7 +198,7 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, AbyssShadowsAssets):
 
         # 设置下次运行时间
         if success:
-            print("我要重新设置时间了")
+            logger.info('Resetting next run time')
             if today == 4:
                 # 周五推迟到周六
                 logger.info(f"The next abyss shadows day is Saturday")
@@ -236,7 +236,10 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, AbyssShadowsAssets):
             # 完成攻打后切换区域
             current_area = self.check_current_area()
             if fight_count < required_count and current_area != AreaType.LEOPARD:
-                next_area_func()
+                # switch_area 在没有下一个区域时返回 False，这里必须退出，否则会无限循环
+                if not next_area_func():
+                    logger.warning("No next area available, stop switching")
+                    break
         return fight_count
 
     def switch_area(self):
@@ -252,7 +255,8 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, AbyssShadowsAssets):
             self.change_area(AreaType.LEOPARD)
         else:
             logger.warning("All areas have been completed, exit")
-            raise StopIteration  # 退出循环
+            return False
+        return True
 
 
 
@@ -346,6 +350,9 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, AbyssShadowsAssets):
                     case AreaType.PEACOCK: is_click = self.click(self.C_ABYSS_PEACOCK,interval=2)
                     case AreaType.FOX: is_click = self.click(self.C_ABYSS_FOX,interval=2)
                     case AreaType.LEOPARD: is_click = self.click(self.C_ABYSS_LEOPARD,interval=2)
+                    case _:
+                        logger.warning(f"Unknown area type: {area_name}")
+                        return False
                 if is_click:
                     click_times += 1
                     logger.info(f"Click {area_name.name} {click_times} times")
@@ -362,7 +369,7 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, AbyssShadowsAssets):
         :return 是否找到敌人，若目标已死亡则返回False，否则返回True
         True 找到敌人，并已经战斗完成
         '''
-        print(f"Find enemy: {enemy_type}")
+        logger.info(f"Find enemy: {enemy_type}")
         while 1:
             self.screenshot()
             # 点击战报按钮

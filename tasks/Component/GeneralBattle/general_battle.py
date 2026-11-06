@@ -450,7 +450,7 @@ class GeneralBattle(BattleWait, GeneralBuff):
             return color_3
 
         # 选择预设组
-        tmp = self.__getattribute__("C_PRESET_GROUP_" + str(preset_group))
+        tmp = getattr(self, "C_PRESET_GROUP_" + str(preset_group), None)
         if tmp is None:
             tmp = self.C_PRESET_GROUP_1
         color_size = [self.C_PRESET_GROUP_1.roi_back[2],
@@ -472,7 +472,7 @@ class GeneralBattle(BattleWait, GeneralBuff):
 
         # 选择预设的队伍
         time.sleep(0.5)
-        tmp = self.__getattribute__("C_PRESET_TEAM_" + str(preset_team))
+        tmp = getattr(self, "C_PRESET_TEAM_" + str(preset_team), None)
         if tmp is None:
             tmp = self.C_PRESET_TEAM_1
         color_size = [5, 5]
@@ -612,7 +612,7 @@ class GeneralBattle(BattleWait, GeneralBuff):
         if not buff:
             return
         logger.info(f'Open buff {buff}')
-        self.ui_click(self.I_BUFF, self.I_CLOUD, interval=2)
+        self.ui_click(self.I_BUFF, self.I_CLOUD, interval=2, timeout=15)
         if isinstance(buff, BuffClass):
             buff = [buff]
         match_method = {
@@ -630,17 +630,31 @@ class GeneralBattle(BattleWait, GeneralBuff):
             BuffClass.EXP_100_CLOSE: (self.exp_100, False),
         }
         for b in buff:
+            if b not in match_method:
+                logger.warning(f'Unsupported buff class: {b}, skipped')
+                continue
             func, is_open = match_method[b]
             func(is_open)
             time.sleep(0.1)
         logger.info(f'Open buff success')
-        while 1:
+        close_buff_timer = Timer(15).start()
+        while not close_buff_timer.reached():
             self.screenshot()
             if not self.appear(self.I_CLOUD):
                 break
             if self.appear_then_click(self.I_BUFF, interval=1):
                 continue
-        self.ui_click_until_disappear(self.I_PREPARE_HIGHLIGHT, interval=0.8)
+        if close_buff_timer.reached():
+            logger.warning('Close buff panel timeout')
+        prepare_timer = Timer(15).start()
+        while not prepare_timer.reached():
+            self.screenshot()
+            if not self.appear(self.I_PREPARE_HIGHLIGHT):
+                break
+            if self.appear_then_click(self.I_PREPARE_HIGHLIGHT, interval=0.8):
+                continue
+        if prepare_timer.reached():
+            logger.warning('Prepare highlight still visible after closing buff')
 
     def boss_mark(self, enable=True) -> bool:
         if not enable or self._boss_mark_flag:
@@ -657,8 +671,9 @@ class GeneralBattle(BattleWait, GeneralBuff):
             logger.info('Boss mark skipped due to maybe no boss')
             self.device.stuck_record_add('BATTLE_STATUS_S')
             return False
-        if self.click(self.O_BOSS_MARK, interval=1.8):
-            return False
+        # OCR 未命中时也点击一次尝试标记；click 的返回值表示 interval 是否到时间，
+        # 不能用来判断点击是否成功，这里统一返回 False。
+        self.click(self.O_BOSS_MARK, interval=1.8)
         return False
 
     def boss_mark_reset(self):

@@ -190,7 +190,7 @@ class SoloExploration(BaseExploration):
                 continue
             #
             elif scene == Scene.BATTLE_PREPARE or scene == Scene.BATTLE_FIGHTING:
-                self.check_take_over_battle(is_screenshot=False, config=self._config.general_battle_config)
+                self.check_take_over_battle(is_screenshot=False, config=self._general_battle_config)
             elif scene == Scene.UNKNOWN:
                 continue
 
@@ -309,7 +309,7 @@ class SoloExploration(BaseExploration):
                 continue
             #
             elif scene == Scene.BATTLE_PREPARE or scene == Scene.BATTLE_FIGHTING:
-                self.check_take_over_battle(is_screenshot=False, config=self._config.general_battle_config)
+                self.check_take_over_battle(is_screenshot=False, config=self._general_battle_config)
             elif scene == Scene.UNKNOWN:
                 continue
 
@@ -365,7 +365,7 @@ class SoloExploration(BaseExploration):
             #
             elif scene == Scene.BATTLE_PREPARE or scene == Scene.BATTLE_FIGHTING:
                 logger.info('[run_member] Handling scene: BATTLE')
-                self.check_take_over_battle(is_screenshot=False, config=self._config.general_battle_config)
+                self.check_take_over_battle(is_screenshot=False, config=self._general_battle_config)
             elif scene == Scene.UNKNOWN:
                 continue
 
