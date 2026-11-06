@@ -32,7 +32,10 @@ async def config_list():
 
 @script_app.post('/config_copy')
 async def config_copy(file: str, template: str = 'template'):
-    mm.copy(file, template)
+    try:
+        mm.copy(file, template)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return mm.all_script_files()
 
 @script_app.get('/config_new_name')
@@ -54,9 +57,14 @@ async def config_rename(old_name: str = '', new_name: str = ''):
     """
     if old_name == new_name or new_name == '':
         return False
+    try:
+        mm.validate_script_name(old_name)
+        mm.validate_script_name(new_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if old_name in mm.script_process:
         if mm.script_process[old_name].state != ScriptState.INACTIVE:
-            mm.script_process[old_name].stop()
+            await mm.script_process[old_name].stop()
         del mm.script_process[old_name]
     if not mm.rename(old_name, new_name):
         raise HTTPException(status_code=400, detail='Rename failed')
@@ -72,9 +80,13 @@ async def config_delete(name: str = ''):
     """
     if name == '' or name == 'template':
         raise HTTPException(status_code=400, detail='Delete failed')
+    try:
+        mm.validate_script_name(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if name in mm.script_process:
         if mm.script_process[name].state != ScriptState.INACTIVE:
-            mm.script_process[name].stop()
+            await mm.script_process[name].stop()
         del mm.script_process[name]
     if not mm.delete(name):
         raise HTTPException(status_code=400, detail='Delete failed')
@@ -106,7 +118,7 @@ async def task_group_copy(task_name: str, group_name: str, dest_config_name: str
 async def script_start(script_name: str):
     if script_name not in mm.script_process:
         mm.script_process[script_name] = ScriptProcess(script_name)
-    mm.script_process[script_name].start()
+    await mm.script_process[script_name].start()
     return
 
 @script_app.get('/{script_name}/stop')
@@ -114,7 +126,7 @@ async def script_stop(script_name: str):
     if script_name not in mm.script_process:
         logger.warning(f'[{script_name}] script process does not exist')
         return
-    mm.script_process[script_name].stop()
+    await mm.script_process[script_name].stop()
     return
 
 @script_app.get('/{script_name}/{task}/args')

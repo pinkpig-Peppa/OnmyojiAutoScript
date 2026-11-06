@@ -8,6 +8,17 @@ from module.logger import logger
 
 class ConfigManager:
 
+    SCRIPT_NAME_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
+
+    @staticmethod
+    def validate_script_name(name: str) -> str:
+        """
+        校验配置名，禁止路径分隔符、.. 等字符，避免 config/ 之外的路径穿越。
+        """
+        if not isinstance(name, str) or not ConfigManager.SCRIPT_NAME_PATTERN.fullmatch(name):
+            raise ValueError(f'invalid config name: {name!r}')
+        return name
+
     @staticmethod
     def all_script_files() -> list[str]:
         """
@@ -55,6 +66,8 @@ class ConfigManager:
         :return:
         """
         config_path = Path.cwd() / 'config'
+        file = ConfigManager.validate_script_name(file)
+        template = ConfigManager.validate_script_name(template)
         template_path = config_path / f'{template}.json'
         file_path = config_path / f'{file}.json'
         if file_path.exists():
@@ -100,6 +113,8 @@ class ConfigManager:
         :return: True or False
         """
         config_path = Path.cwd() / 'config'
+        old_name = ConfigManager.validate_script_name(old_name)
+        new_name = ConfigManager.validate_script_name(new_name)
         old_path = config_path / f'{old_name}.json'
         new_path = config_path / f'{new_name}.json'
         if not old_path.exists():
@@ -124,6 +139,7 @@ class ConfigManager:
         :return: True or False
         """
         config_path = Path.cwd() / 'config'
+        file = ConfigManager.validate_script_name(file)
         file_path = config_path / f'{file}.json'
         if not file_path.exists():
             logger.error(f'{file_path} is not exists')

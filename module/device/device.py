@@ -29,13 +29,15 @@ from module.logger import logger
 
 class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
     _screen_size_checked = False
-    detect_record = set()
-    click_record = deque(maxlen=15)
-    stuck_timer = Timer(60, count=60).start()
-    stuck_timer_long = Timer(300, count=300).start()
     stuck_long_wait_list = ['BATTLE_STATUS_S', 'PAUSE', 'LOGIN_CHECK', 'PREPARE_BEFORE_BATTLE']
 
     def __init__(self, *args, **kwargs):
+        # 实例级状态，避免多开时 detect/click 记录与卡死计时器在实例间共享
+        self.detect_record = set()
+        self.click_record = deque(maxlen=15)
+        self.stuck_timer = Timer(60, count=60).start()
+        self.stuck_timer_long = Timer(300, count=300).start()
+
         for trial in range(4):
             try:
                 super().__init__(*args, **kwargs)

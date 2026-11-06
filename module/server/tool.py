@@ -538,6 +538,21 @@ class AnnotatorManager:
         stem = re.sub(r"[^a-zA-Z0-9_\-]", "_", stem)
         return stem or "image"
 
+    @staticmethod
+    def _validate_image_name(image_name: str, index: int) -> str:
+        """
+        校验资源图片文件名，阻断换行/引号注入与目录穿越。
+        """
+        if len(image_name) > 128:
+            raise AnnotatorError("invalid_rule", f"第 {index + 1} 条规则 imageName 过长", 400)
+        if any(ch in image_name for ch in '\r\n"\'\\/'):
+            raise AnnotatorError("invalid_rule", f"第 {index + 1} 条规则 imageName 含非法字符", 400)
+        if '..' in image_name:
+            raise AnnotatorError("invalid_rule", f"第 {index + 1} 条规则 imageName 含非法路径", 400)
+        if Path(image_name).suffix.lower() not in ALLOWED_IMAGE_EXT:
+            raise AnnotatorError("invalid_rule", f"第 {index + 1} 条规则 imageName 后缀不支持", 400)
+        return image_name
+
     def save_uploaded_images_base64(self, session_id: str, images_payload: list[dict[str, Any]]) -> list[dict[str, Any]]:
         session = self._get_session(session_id)
         results: list[dict[str, Any]] = []
@@ -689,6 +704,7 @@ class AnnotatorManager:
             if not item_name:
                 raise AnnotatorError("invalid_rule", f"第 {index + 1} 条规则缺少 itemName", 400)
             image_name = str(rule.get("imageName", "")).strip() or f"{item_name}.png"
+            image_name = self._validate_image_name(image_name, index)
             threshold_value = rule.get("threshold", 0.8)
             try:
                 threshold = float(threshold_value)

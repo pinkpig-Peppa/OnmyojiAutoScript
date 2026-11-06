@@ -56,7 +56,8 @@ def ensure_ocr_server_started() -> bool:
         port = int(deploy_config.OcrServerPort)
     else:
         _, port = _split_host_port(str(deploy_config.OcrClientAddress))
-    host = "0.0.0.0"
+    # OCR 服务仅本机使用，绑定 loopback，避免 pickle 反序列化接口暴露到局域网/公网
+    host = "127.0.0.1"
 
     if _is_port_in_use("127.0.0.1", port):
         logger.info(f"OCR server already running on port {port}")

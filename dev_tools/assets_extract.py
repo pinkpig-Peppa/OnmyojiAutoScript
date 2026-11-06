@@ -2,6 +2,7 @@
 # @author runhey
 # github https://github.com/runhey
 import json
+import re
 import numpy as np
 
 from tqdm.contrib.concurrent import process_map
@@ -37,6 +38,33 @@ def name_transform(name: str) -> str:
     return name.upper()
 
 
+def safe_identifier(name: str) -> str:
+    """
+    把资源名转换为安全的 Python 标识符，防止注释、引号、换行等字符注入源码。
+    """
+    ident = name_transform(str(name))
+    ident = re.sub(r"[^0-9A-Za-z_]", "_", ident)
+    if not ident:
+        return "_"
+    if ident[0].isdigit():
+        return f"_{ident}"
+    return ident
+
+
+def safe_str(value) -> str:
+    """
+    生成安全的 Python 字符串字面量，等价于原双引号写法，但会转义引号和换行。
+    """
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def safe_comment(value) -> str:
+    """
+    注释内容只允许单行，避免通过换行注入可执行代码。
+    """
+    return str(value).replace("\r", " ").replace("\n", " ")
+
+
 class ImageExtractor:
 
     def __init__(self, file: str, data: list) -> None:
@@ -62,13 +90,14 @@ class ImageExtractor:
         :param item:
         :return:
         """
-        description: str = f'\t# {item["description"]} \n'
-        name: str = f'\tI_{name_transform(item["itemName"])} = RuleImage(' \
+        description: str = f'\t# {safe_comment(item["description"])} \n'
+        image_file = f'./{self.image_path}/{item["imageName"]}'
+        name: str = f'\tI_{safe_identifier(item["itemName"])} = RuleImage(' \
                     f'roi_front=({item["roiFront"]}), ' \
                     f'roi_back=({item["roiBack"]}), ' \
                     f'threshold={item["threshold"]}, ' \
-                    f'method="{item["method"]}", ' \
-                    f'file="./{self.image_path}/{item["imageName"]}")\n'
+                    f'method={safe_str(item["method"])}, ' \
+                    f'file={safe_str(image_file)})\n'
         return description + name
 
 
@@ -93,11 +122,11 @@ class ClickExtractor:
         :param item:
         :return:
         """
-        description: str = f'\t# {item["description"]} \n'
-        name: str = f'\tC_{name_transform(item["itemName"])} = RuleClick(' \
+        description: str = f'\t# {safe_comment(item["description"])} \n'
+        name: str = f'\tC_{safe_identifier(item["itemName"])} = RuleClick(' \
                     f'roi_front=({item["roiFront"]}), ' \
                     f'roi_back=({item["roiBack"]}), ' \
-                    f'name="{item["itemName"]}")\n'
+                    f'name={safe_str(item["itemName"])})\n'
         return description + name
 
 
@@ -122,12 +151,12 @@ class LongClickExtractor:
         :param item:
         :return:
         """
-        description: str = f'\t# {item["description"]} \n'
-        name: str = f'\tL_{name_transform(item["itemName"])} = RuleLongClick(' \
+        description: str = f'\t# {safe_comment(item["description"])} \n'
+        name: str = f'\tL_{safe_identifier(item["itemName"])} = RuleLongClick(' \
                     f'roi_front=({item["roiFront"]}), ' \
                     f'roi_back=({item["roiBack"]}), ' \
                     f'duration={item["duration"]}, ' \
-                    f'name="{item["itemName"]}")\n'
+                    f'name={safe_str(item["itemName"])})\n'
         return description + name
 
 
@@ -152,12 +181,12 @@ class SwipeExtractor:
         :param item:
         :return:
         """
-        description: str = f'\t# {item["description"]} \n'
-        name: str = f'\tS_{name_transform(item["itemName"])} = RuleSwipe(' \
+        description: str = f'\t# {safe_comment(item["description"])} \n'
+        name: str = f'\tS_{safe_identifier(item["itemName"])} = RuleSwipe(' \
                     f'roi_front=({item["roiFront"]}), ' \
                     f'roi_back=({item["roiBack"]}), ' \
-                    f'mode="{item["mode"]}", ' \
-                    f'name="{item["itemName"]}")\n'
+                    f'mode={safe_str(item["mode"])}, ' \
+                    f'name={safe_str(item["itemName"])})\n'
         return description + name
 
 
@@ -182,14 +211,14 @@ class OcrExtractor:
         :param item:
         :return:
         """
-        description: str = f'\t# {item["description"]} \n'
-        name: str = f'\tO_{name_transform(item["itemName"])} = RuleOcr(' \
+        description: str = f'\t# {safe_comment(item["description"])} \n'
+        name: str = f'\tO_{safe_identifier(item["itemName"])} = RuleOcr(' \
                     f'roi=({item["roiFront"]}), ' \
                     f'area=({item["roiBack"]}), ' \
-                    f'mode="{item["mode"]}", ' \
-                    f'method="{item["method"]}", ' \
-                    f'keyword="{item["keyword"]}", ' \
-                    f'name="{item["itemName"]}")\n'
+                    f'mode={safe_str(item["mode"])}, ' \
+                    f'method={safe_str(item["method"])}, ' \
+                    f'keyword={safe_str(item["keyword"])}, ' \
+                    f'name={safe_str(item["itemName"])})\n'
         return description + name
 
 
@@ -230,16 +259,16 @@ class ListExtractor:
             roi_front = item["roiFront"].split(",")
             width += int(roi_front[2])
             height += int(roi_front[3])
-            array.append(f'"{item["itemName"]}"')
+            array.append(safe_str(item["itemName"]))
         width = int(width / len(items))
         height = int(height / len(items))
         array = ', '.join(array)
 
-        description: str = f'\t# {data["description"]} \n'
-        name: str = f'\tL_{name_transform(data["name"])} = RuleList(' \
-                    f'folder="./{str(self.image_path)}", ' \
-                    f'direction="{data["direction"]}", ' \
-                    f'mode="{data["type"]}", ' \
+        description: str = f'\t# {safe_comment(data["description"])} \n'
+        name: str = f'\tL_{safe_identifier(data["name"])} = RuleList(' \
+                    f'folder={safe_str(self.image_path)}, ' \
+                    f'direction={safe_str(data["direction"])}, ' \
+                    f'mode={safe_str(data["type"])}, ' \
                     f'roi_back=({data["roiBack"]}), ' \
                     f'size=({width}, {height}), ' \
                     f'\n\t\t\t\t\t array=[{str(array)}])\n'
