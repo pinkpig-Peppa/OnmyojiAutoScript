@@ -203,6 +203,11 @@ class Handle(DesktopWindow):
             logger.info('Handle is auto. oas will find window emulator')
             window_list = Handle.all_windows()
             self.root_handle_title = self.auto_handle_title(window_list)
+            if not self.root_handle_title:
+                # 自动探测失败必须显式报错：否则 root_handle_title 为 None，
+                # 会在 emulator_family 的 .find() 处抛 AttributeError，位置具有误导性
+                raise EmulatorNotRunningError(
+                    'Can not find emulator window, please check your emulator is running')
             self.root_handle_num = handle_title2num(self.root_handle_title)
         if isinstance(self.root_handle, str):
             try:
@@ -398,12 +403,13 @@ class Handle(DesktopWindow):
 
         elif self.emulator_family == EmulatorFamily.FAMILY_MEMU:
             for node in PreOrderIter(self.root_node):
-                if node.name == Handle.emulator_handle['memu_player_family']:
+                # emulator_handle 里存的是 list，必须取 [0]，否则 str == list 恒不成立
+                if node.name == Handle.emulator_handle['memu_player_family'][0]:
                     return node.num
 
         elif self.emulator_family == EmulatorFamily.FAMILY_BLUESTACKS:
             for node in PreOrderIter(self.root_node):
-                if node.name == Handle.emulator_handle['bluestacks_family']:
+                if node.name == Handle.emulator_handle['bluestacks_family'][0]:
                     return node.num
         return self.root_node.num
 

@@ -24,7 +24,11 @@ class ConfigWatcher:
         """
         Last modify time of the file
         """
-        timestamp = os.stat(filepath_config(self.config_name)).st_mtime
+        try:
+            timestamp = os.stat(filepath_config(self.config_name)).st_mtime
+        except OSError:
+            # 配置尚未生成或已被删除时不要抛异常
+            return DEFAULT_TIME
         mtime = datetime.fromtimestamp(timestamp).replace(microsecond=0)
         return mtime
 

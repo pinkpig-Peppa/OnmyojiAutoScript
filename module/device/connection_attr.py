@@ -52,14 +52,8 @@ class ConnectionAttr:
             for k, _ in deep_iter(d, depth=1):
                 if 'proxy' in k[0].split('_')[-1].lower():
                     del os.environ[k[0]]
-        else:
-            su = super(self.config.__class__, self.config)
-            for k, v in deep_iter(su.__dict__, depth=1):
-                if not isinstance(v, str):
-                    continue
-                if 'eri' in k[0].split('_')[-1]:
-                    print(k, v)
-                    su.__setattr__(k[0], chr(8) + v)
+        # else 分支原为 alas 迁移残留：会给父类实例里名字含 'eri' 的属性前置 chr(8)，
+        # 属隐蔽的配置篡改，且 print 输出绕过日志系统，直接删除。
         # 桌面客户端模式不需要 adb，跳过 adb server 拉起
         if not self.is_desktop:
             # Cache adb_client
@@ -96,8 +90,8 @@ class ConnectionAttr:
                     self.config.script.device.screenshot_method = 'uiautomator2'
                     self.config.script.device.control_method = 'uiautomator2'
         if self.is_over_http:
-            if self.config.script.device.screenshot_method not in ["ADB", "uiautomator2", "aScreenCap"] \
-                    or self.config.script.device.control_method not in ["ADB", "uiautomator2", "minitouch"]:
+            if self.config.script.device.screenshot_method not in ["ADB", "adb", "uiautomator2", "aScreenCap"] \
+                    or self.config.script.device.control_method not in ["ADB", "adb", "uiautomator2", "minitouch"]:
                 logger.warning(
                     f'When connecting to a device over http: {self.serial} '
                     f'ScreenshotMethod can only use ["ADB", "uiautomator2", "aScreenCap"], '

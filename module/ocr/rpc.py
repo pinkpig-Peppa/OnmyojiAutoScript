@@ -56,7 +56,8 @@ def ensure_ocr_server_started() -> bool:
         port = int(deploy_config.OcrServerPort)
     else:
         _, port = _split_host_port(str(deploy_config.OcrClientAddress))
-    host = "0.0.0.0"
+    # 只监听本机：服务端对网络数据做 pickle.loads，暴露到 0.0.0.0 等于远程代码执行
+    host = "127.0.0.1"
 
     if _is_port_in_use("127.0.0.1", port):
         logger.info(f"OCR server already running on port {port}")
@@ -75,7 +76,8 @@ def ensure_ocr_server_started() -> bool:
     )
     _OCR_SERVER_PROCESS.start()
     logger.info(f"Start OCR server on {host}:{port}")
-    for _ in range(50):
+    # ONNX 模型加载通常超过 5 秒，等待上限放宽到 30 秒
+    for _ in range(300):
         if _is_port_in_use("127.0.0.1", port):
             return True
         time.sleep(0.1)

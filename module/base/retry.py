@@ -46,6 +46,8 @@ def __retry_internal(f, exceptions=Exception, tries=-1, delay=0, max_delay=None,
                    default: retry.logging_logger. if None, logging is disabled.
     :returns: the result of the f function.
     """
+    if tries == 0:
+        raise ValueError('tries must be a positive number (or -1 for infinite retries)')
     _tries, _delay = tries, delay
     while _tries:
         try:
@@ -53,8 +55,8 @@ def __retry_internal(f, exceptions=Exception, tries=-1, delay=0, max_delay=None,
         except exceptions as e:
             _tries -= 1
             if not _tries:
-                # Difference, raise same exception
-                raise e
+                # Difference, raise same exception (bare raise 保留原始 traceback)
+                raise
 
             if logger is not None:
                 # Difference, show exception

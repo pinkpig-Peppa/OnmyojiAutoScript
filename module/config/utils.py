@@ -88,10 +88,10 @@ def write_file(file: str, data):
         if ext == '.yaml':
             with atomic_write(file, overwrite=True, encoding='utf-8', newline='') as f:
                 if isinstance(data, list):
-                    yaml.safe_dump_all(data, f, default_flow_style=False, encoding='utf-8', allow_unicode=True,
+                    yaml.safe_dump_all(data, f, default_flow_style=False, allow_unicode=True,
                                        sort_keys=False)
                 else:
-                    yaml.safe_dump(data, f, default_flow_style=False, encoding='utf-8', allow_unicode=True,
+                    yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True,
                                    sort_keys=False)
         elif ext == '.json':
             with atomic_write(file, overwrite=True, encoding='utf-8', newline='') as f:

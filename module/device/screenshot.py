@@ -142,7 +142,7 @@ class Screenshot(Adb, DroidCast, Scrcpy, Window, NemuIpc):
             self._last_save_time[genre] = now
             return True
         else:
-            self._last_save_time[genre] = now
+            # 未保存时不要刷新时间戳，否则高频调用会让 now-last 永远小于 interval，截图永不落盘
             return False
 
     def screenshot_last_save_time_reset(self, genre):

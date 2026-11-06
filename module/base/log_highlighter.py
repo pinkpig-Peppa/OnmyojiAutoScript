@@ -20,6 +20,9 @@ def highlight_text(input_text):
         r'CRITICAL': 'darkred'
     }
 
+    # 先转义，避免日志内容里的 <、& 被当成 HTML 标签注入
+    input_text = escape(input_text)
+
     for pattern, color in color_mapping.items():
         input_text = re.sub(pattern, f'<span style="color: {color}">\\g<0></span>', input_text)
 
