@@ -8,8 +8,8 @@ from module.logger import logger
 from module.server.i18n import I18n
 
 from tasks.Component.Costume.config import (
-    MainType, CostumeConfig, RealmType,
-    ThemeType, ShikigamiType, SignType,
+    MainType, CostumeConfig,
+    ThemeType, ShikigamiType,
     BattleType, BattleSceneType, CarpBannerType
 )
 from tasks.Component.Costume.assets import CostumeAssets
@@ -45,8 +45,6 @@ main_costume_model[getattr(MainType, "COSTUME_MAIN_13")] = {
     'I_MAIN_GOTO_TOWN': ['I_MAIN_GOTO_TOWN_13',],
     'I_PET_HOUSE': ['I_PET_HOUSE_13',],
 }
-
-
 
 # 鲤鱼旗皮肤
 carpbanner_costume_model = {
@@ -132,6 +130,16 @@ class CostumeBase:
             return
         # setattr(self, asset_before, asset_after)
         asset_before_object: RuleImage = getattr(self, asset_before)
+        # If this asset was previously turned into a multi-frame RuleGif by a
+        # list-based costume (main13/main17), strip the GIF state so the
+        # single-frame RuleImage behavior is restored. Otherwise the stale
+        # `targets` and the bound RuleGif methods keep matching the previous
+        # costume's templates after switching to a string-based costume.
+        for attr in ('targets', 'appear_target'):
+            asset_before_object.__dict__.pop(attr, None)
+        for method_name in ('pre_process', 'search', 'search_with_multi_scale',
+                            'match_multi_scale', 'match', 'coord', 'front_center'):
+            asset_before_object.__dict__.pop(method_name, None)
         asset_before_object.roi_front = list(asset_after.roi_front)
         if rp_roi_back:
             asset_before_object.roi_back = asset_after.roi_back
@@ -222,8 +230,3 @@ class CostumeBase:
             assert_value: RuleImage = getattr(shikigami_assets, value)
             # 一般不需要固定 back ROI，如确有需要可在此为特例设置 rp_roi_back=False
             self.replace_img(key, assert_value)
-
-
-if __name__ == '__main__':
-    c = CostumeBase()
-    c.check_costume_main(MainType.COSTUME_MAIN_13)
