@@ -2,7 +2,7 @@
 # @author runhey
 # github https://github.com/runhey
 import json
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException
 from pathlib import Path
 
 from module.config.utils import write_file
@@ -45,7 +45,7 @@ async def notify_test(setting: str, title: str, content: str):
         return str(e)
 
 
-@home_app.get('/kill_server')
+@home_app.post('/kill_server')
 async def kill_server():
     shutdown_ocr_server()
     MainManager.signal_kill_server = True
@@ -68,7 +68,7 @@ async def update_info():
         return None
 
 
-@home_app.get('/execute_update')
+@home_app.post('/execute_update')
 async def execute_update():
     # 下拉仓库 -> 关闭所有脚本进程 -> 最后重启oasx
     try:
@@ -85,6 +85,7 @@ async def chinese_translate(data: dict = Body(...)):
         I18n.save_zh_cn(data)
     except Exception as e:
         logger.error(e)
+        raise HTTPException(status_code=400, detail=str(e))
     return True
 
 

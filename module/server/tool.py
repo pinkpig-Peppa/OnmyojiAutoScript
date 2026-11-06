@@ -45,6 +45,9 @@ ALLOWED_LIST_MODE = set(field_options("list", "type"))
 ALLOWED_SWIPE_MODE = set(field_options("swipe", "mode"))
 
 SESSION_IDLE_TIMEOUT_SECONDS = 10 * 60
+# 单次上传图片数量 / 单张图片解码后字节上限
+MAX_UPLOAD_IMAGES = 50
+MAX_UPLOAD_IMAGE_BYTES = 10 * 1024 * 1024
 SESSION_SWEEP_INTERVAL_SECONDS = 30
 EMULATOR_CAPTURE_MAX_RETRIES = 3
 EMULATOR_CAPTURE_RETRY_BACKOFF_SECONDS = 1.0
@@ -111,6 +114,8 @@ class EmulatorCaptureSession:
 
     def start(self, config_name: str, frame_rate: int) -> int:
         self.stop(clear_error=True)
+        if self._thread is not None and self._thread.is_alive():
+            raise AnnotatorError("capture_starting", "上一帧采集线程尚未退出，请稍后重试", 409)
         with self._frame_lock:
             self.config_name = config_name
             self.frame_rate = max(1, min(int(frame_rate), 10))
@@ -131,6 +136,14 @@ class EmulatorCaptureSession:
         thread = self._thread
         if thread and thread.is_alive():
             thread.join(timeout=2.5)
+        if thread and thread.is_alive():
+            # 采集线程在超时内仍未退出，保留句柄，避免随后 start() 重建线程时复活旧线程
+            logger.warning(
+                f"[annotator] emulator capture thread still alive after stop, session={self.session_id}, state={self.state}"
+            )
+            with self._frame_lock:
+                self.state = "stopped"
+            return
         self._thread = None
         with self._frame_lock:
             self.state = "stopped"
@@ -248,6 +261,11 @@ class EmulatorCaptureSession:
             if self.state != "running" or self._latest_jpeg is None:
                 return None
             return bytes(self._latest_jpeg)
+
+    def frame_token(self) -> float:
+        """帧序号（单调递增的时间戳），用于消费端判断是否有新帧"""
+        with self._frame_lock:
+            return self._updated_at
 
     def capture_latest_frame(self, output_file: Path) -> None:
         with self._frame_lock:
@@ -435,9 +453,18 @@ class AnnotatorManager:
         if not ANNOTATOR_ROOT.exists():
             return removed
 
+        now = time.time()
         for target in ANNOTATOR_ROOT.iterdir():
             if target.name == keep_session_id:
                 continue
+            try:
+                if target.is_dir() and (now - target.stat().st_mtime) < self._session_idle_timeout:
+                    logger.info(
+                        f"[annotator] skip active foreign session dir, session={target.name}, reason={reason}"
+                    )
+                    continue
+            except OSError:
+                pass
             try:
                 if self._cleanup_session_dir_path(target.name, target, reason):
                     removed += 1
@@ -540,6 +567,8 @@ class AnnotatorManager:
 
     def save_uploaded_images_base64(self, session_id: str, images_payload: list[dict[str, Any]]) -> list[dict[str, Any]]:
         session = self._get_session(session_id)
+        if len(images_payload) > MAX_UPLOAD_IMAGES:
+            raise AnnotatorError("too_many_images", f"单次上传图片数量过多: {len(images_payload)}", 413)
         results: list[dict[str, Any]] = []
         for payload in images_payload:
             filename = str(payload.get("name", "")).strip()
@@ -557,10 +586,23 @@ class AnnotatorManager:
             target = session.upload_dir / image_name
             if "," in content_base64:
                 content_base64 = content_base64.split(",", 1)[1]
+            # 先按 base64 长度估算解码后大小，避免把超大 payload 整体解码进内存
+            if len(content_base64) * 3 // 4 > MAX_UPLOAD_IMAGE_BYTES:
+                raise AnnotatorError(
+                    "image_too_large",
+                    f"image too large: {filename}",
+                    413,
+                )
             try:
                 content = base64.b64decode(content_base64)
             except Exception as e:
                 raise AnnotatorError("invalid_image_data", f"图片编码解析失败: {filename}", 400) from e
+            if len(content) > MAX_UPLOAD_IMAGE_BYTES:
+                raise AnnotatorError(
+                    "image_too_large",
+                    f"图片过大: {filename} ({len(content)} > {MAX_UPLOAD_IMAGE_BYTES})",
+                    413,
+                )
             target.write_bytes(content)
             image = session.add_image(target, "upload", filename)
             results.append(image.to_dict(session_id))
@@ -643,6 +685,10 @@ class AnnotatorManager:
     def latest_emulator_frame(self, session_id: str) -> bytes | None:
         session = self._get_session(session_id)
         return session.capture_session.latest_jpeg()
+
+    def emulator_frame_token(self, session_id: str) -> float:
+        session = self._get_session(session_id)
+        return session.capture_session.frame_token()
 
     def capture_from_emulator(self, session_id: str) -> dict[str, Any]:
         session = self._get_session(session_id)

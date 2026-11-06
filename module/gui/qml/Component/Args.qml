@@ -549,11 +549,19 @@ Item {
             return
         }
         if(valueData === ""){
-            console.debug("没有数据")
+            console.debug("no value data")
+            return
         }
 
-        const args = JSON.parse(argsData)
-        const values = JSON.parse(valueData)
+        var args
+        var values
+        try{
+            args = JSON.parse(argsData)
+            values = JSON.parse(valueData)
+        }catch(e){
+            console.error("parse args/value data failed: " + e)
+            return
+        }
         const group = MP.parseGroup(args["properties"])
         const groups = MP.parseGroups(args["properties"])
 

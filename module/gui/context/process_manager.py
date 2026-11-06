@@ -45,6 +45,9 @@ def is_port_in_use(ip, port) -> bool:
     except:
         logger.info(f'Port {port} is not in use')
         return False
+    finally:
+        # 探测用的 socket 必须关闭，否则反复 add 会泄漏文件描述符
+        s.close()
 
 
 
@@ -116,10 +119,18 @@ class ProcessManager(QObject):
             try:
                 self.clients[config] = zerorpc.Client()
                 self.clients[config].connect(f'tcp://127.0.0.1:{self.ports[config]}')
-            except:
+                self.processes[config].start()
+            except Exception:
                 logger.exception(f'Connect to script {config} error')
+                # 失败回滚，避免留下半初始化的状态
+                try:
+                    self.processes[config].terminate()
+                except Exception:
+                    pass
+                self.clients.pop(config, None)
+                self.processes.pop(config, None)
+                self.ports.pop(config, None)
                 raise
-            self.processes[config].start()
             logger.info(f'Add script {config}')
         else:
             logger.info(f'Script {config} is already running')
@@ -132,9 +143,11 @@ class ProcessManager(QObject):
         """
         if config in self.processes:
             self.processes[config].stop()
-            del self.processes[config]
-            del self.ports[config]
-            del self.clients[config]
+            self.processes.pop(config, None)
+            self.ports.pop(config, None)
+            self.clients.pop(config, None)
+            self.log_queue.pop(config, None)
+            self.log_thread.pop(config, None)
             logger.info(f'Remove script {config}')
             logger.info(f'Port {config} is released')
         else:
@@ -143,7 +156,7 @@ class ProcessManager(QObject):
     @Slot(str)
     def restart(self, config: str) -> None:
         """
-        restart  重启某个进程（会重启zerorpc），但是ports、clients、log_queue、log_thread不会重启
+        restart  重启某个进程（会重启zerorpc）
         :param config:
         :return:
         """
@@ -151,23 +164,36 @@ class ProcessManager(QObject):
             if not self.processes[config].is_alive():  # 如果进程已经死亡，那么就重新启动
                 logger.info(f'{config} process is dead, restart it')
 
-
             self.processes[config].terminate()  # 强制结束进程
-            if self.ports[config] is None:
-                logger.error(f'{config} port {config} is None')
-            if self.clients[config] is None:
-                logger.error(f'{config} client {config} is None')
-            if self.log_queue[config] is None:
-                logger.info(f'{config} log_queue {config} is None')
+            self.processes[config].join(timeout=5)
+            if self.processes[config].is_alive():
+                self.processes[config].kill()
+                self.processes[config].join(timeout=2)
+
+            port = self.ports.get(config)
+            if port is None:
+                logger.error(f'{config} port is None')
+                return
+            if config not in self.log_queue or self.log_queue[config] is None:
+                logger.info(f'{config} log_queue is None')
                 self.log_queue[config] = self.manager.Queue()
-            if self.log_thread[config] is None or self.log_thread[config].is_alive() is False:
-                logger.info(f'{config} log_thread {config} is None')
+            if (config not in self.log_thread or self.log_thread[config] is None
+                    or self.log_thread[config].is_alive() is False):
+                logger.info(f'{config} log_thread is None, restart it')
+                self.log_thread[config] = Thread(target=self.log_thread_func, args=(config,), daemon=True)
+                self.log_thread[config].start()
 
             self.processes[config] = ScriptProcess(config=config,
-                                                   port=self.ports[config],
+                                                   port=port,
                                                    log_queue=self.log_queue[config],
                                                    update_queue=self.update_queue)
             self.processes[config].start()
+            # 重建 zerorpc 客户端：旧连接对应的是已经结束的进程，不能复用
+            try:
+                self.clients[config] = zerorpc.Client()
+                self.clients[config].connect(f'tcp://127.0.0.1:{port}')
+            except Exception:
+                logger.exception(f'Reconnect to script {config} error')
             logger.info(f'Restart script {config}')
         else:
             logger.info(f'Script {config} is not running')
@@ -177,7 +203,7 @@ class ProcessManager(QObject):
         stop_all
         :return:
         """
-        for config in self.processes:
+        for config in list(self.processes.keys()):
             self.processes[config].stop()
         logger.info(f'Stop all script')
 
@@ -186,8 +212,8 @@ class ProcessManager(QObject):
         restart_all
         :return:
         """
-        for config in self.processes:
-            self.processes[config].restart()
+        for config in list(self.processes.keys()):
+            self.restart(config)
         logger.info(f'Restart all script')
 
     def get_client(self, config: str) -> zerorpc.Client:
@@ -240,7 +266,7 @@ class ProcessManager(QObject):
             return self.check_script(config).gui_args(task)
         else:
             logger.info(f'Script {config} is not running')
-            return None
+            return ""
 
     @Slot(str, str, result="QString")
     def gui_task(self, config: str, task: str) -> str:
@@ -255,7 +281,7 @@ class ProcessManager(QObject):
             return self.check_script(config).gui_task(task)
         else:
             logger.info(f'Script {config} is not running')
-            return None
+            return ""
 
     @Slot(str, str, str, str, str, result="bool")
     def gui_set_task(self, config: str, task: str, group: str, arg: str, value) -> bool:
@@ -338,9 +364,16 @@ class ProcessManager(QObject):
             buffer.seek(0)  # 将读取位置重置为起始位置
             image_data = np.frombuffer(buffer.getvalue(), dtype=np.uint8)
             image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
+            if image is None:
+                logger.error(f'Decode mirror image of {config} failed')
+                return QImage()
 
+            # 保证内存连续，并用 copy() 让 QImage 拥有自己的像素数据，
+            # 避免函数返回后 numpy 缓冲被回收造成悬垂
+            image = np.ascontiguousarray(image)
             height, width, _ = image.shape
-            image_qt = QImage(image.data, width, height, QImage.Format_RGB888).rgbSwapped()
+            image_qt = QImage(image.data, width, height, image.strides[0],
+                              QImage.Format_RGB888).rgbSwapped().copy()
             return image_qt
 
 
@@ -358,7 +391,7 @@ class ProcessManager(QObject):
             return self.check_script(config).gui_task_list()
         else:
             logger.info(f'Script {config} is not running')
-            return None
+            return ""
 
 
 
@@ -395,7 +428,8 @@ class ProcessManager(QObject):
             logger.info(f'Script {config_name} is not running')
             return
 
-        while self.log_thread[config_name].is_alive():
+        log_thread = self.log_thread.get(config_name)
+        while log_thread is not None and log_thread.is_alive():
             try:
                 log = q.get(timeout=1)
                 if log is None:
@@ -406,8 +440,9 @@ class ProcessManager(QObject):
             except Empty:
                 continue
             except Exception as e:
+                # 单条日志异常不应该杀掉整个日志线程
                 logger.error(f'Log thread of {config_name} error: {e}')
-                break
+                continue
 
     def start_update_tasks(self) -> None:
         """
@@ -438,7 +473,10 @@ class ProcessManager(QObject):
 
                 logger.info(f'Update thread get')
                 for key, value in update.items():
-                    if "task" and "pending" and "waiting" in value:
+                    if not isinstance(value, dict):
+                        continue
+                    # 原写法 "task" and "pending" and "waiting" in value 恒为真
+                    if "task" in value and "pending" in value and "waiting" in value:
                         self.sig_update_task.emit(key, json.dumps(value["task"]))
                         self.sig_update_pending.emit(key, json.dumps(value["pending"]))
                         self.sig_update_waiting.emit(key, json.dumps(value["waiting"]))
@@ -446,8 +484,9 @@ class ProcessManager(QObject):
             except Empty:
                 continue
             except Exception as e:
+                # 单次更新数据异常不应该杀掉更新线程
                 logger.error(f'Update thread error: {e}')
-                break
+                continue
 
     @Slot(str)
     def start_script(self, config: str) -> None:

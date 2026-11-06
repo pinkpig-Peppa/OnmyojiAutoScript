@@ -57,7 +57,12 @@ class ScriptProcess(Process):
         :return:
         """
         self.terminate()
-        self.join()
+        # join 必须带超时，否则子进程卡死会挂住 GUI 主线程
+        self.join(timeout=5)
+        if self.is_alive():
+            logger.warning(f'stop script {self.config} timeout, kill it')
+            self.kill()
+            self.join(timeout=2)
         logger.info(f'stop script {self.config}')
 
     # def restart(self) -> None:

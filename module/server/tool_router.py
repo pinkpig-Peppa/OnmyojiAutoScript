@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from module.logger import logger
+from module.server.setting import State
 from module.server.tool import AnnotatorError, annotator_manager
 
 tool_app = APIRouter(
@@ -97,7 +98,7 @@ def _close_session_safely(session_id: str, reason: str) -> dict[str, Any]:
 
 
 @tool_app.get('/annotator')
-async def tool_annotator_page():
+def tool_annotator_page():
     page = annotator_manager.index_file()
     if not page.exists():
         raise HTTPException(status_code=404, detail={"code": "page_not_found", "message": "标注页面不存在"})
@@ -105,13 +106,13 @@ async def tool_annotator_page():
 
 
 @tool_app.post('/annotator/api/session')
-async def annotator_create_session():
+def annotator_create_session():
     session = annotator_manager.create_session()
     return {"code": "ok", "session": session}
 
 
 @tool_app.get('/annotator/api/session/{session_id}')
-async def annotator_get_session(session_id: str):
+def annotator_get_session(session_id: str):
     try:
         session = annotator_manager.get_session_snapshot(session_id)
         return {"code": "ok", "session": session}
@@ -122,7 +123,7 @@ async def annotator_get_session(session_id: str):
 
 
 @tool_app.delete('/annotator/api/session/{session_id}')
-async def annotator_close_session(session_id: str, reason: str = "client_close"):
+def annotator_close_session(session_id: str, reason: str = "client_close"):
     try:
         result = _close_session_safely(session_id, f"api:{reason}")
         return {"code": "ok", **result}
@@ -131,7 +132,7 @@ async def annotator_close_session(session_id: str, reason: str = "client_close")
 
 
 @tool_app.post('/annotator/api/session/{session_id}/close')
-async def annotator_close_session_beacon(session_id: str, reason: str = "pagehide"):
+def annotator_close_session_beacon(session_id: str, reason: str = "pagehide"):
     try:
         result = _close_session_safely(session_id, f"beacon:{reason}")
         return {"code": "ok", **result}
@@ -139,7 +140,7 @@ async def annotator_close_session_beacon(session_id: str, reason: str = "pagehid
         _raise_annotator_error(e)
 
 @tool_app.post('/annotator/api/images/upload')
-async def annotator_upload_images(data: UploadImagesBody):
+def annotator_upload_images(data: UploadImagesBody):
     try:
         images = annotator_manager.save_uploaded_images_base64(
             data.session_id,
@@ -151,7 +152,7 @@ async def annotator_upload_images(data: UploadImagesBody):
 
 
 @tool_app.get('/annotator/api/images')
-async def annotator_list_images(session_id: str):
+def annotator_list_images(session_id: str):
     try:
         images = annotator_manager.list_images(session_id)
         return {"code": "ok", "images": images}
@@ -160,7 +161,7 @@ async def annotator_list_images(session_id: str):
 
 
 @tool_app.get('/annotator/api/images/{session_id}/{image_id}')
-async def annotator_image_file(session_id: str, image_id: str):
+def annotator_image_file(session_id: str, image_id: str):
     try:
         image = annotator_manager.get_image_file(session_id, image_id)
         return FileResponse(image)
@@ -169,7 +170,7 @@ async def annotator_image_file(session_id: str, image_id: str):
 
 
 @tool_app.delete('/annotator/api/images/{session_id}/{image_id}')
-async def annotator_delete_image(session_id: str, image_id: str):
+def annotator_delete_image(session_id: str, image_id: str):
     try:
         session = annotator_manager.delete_image(session_id, image_id)
         return {"code": "ok", "session": session}
@@ -178,7 +179,7 @@ async def annotator_delete_image(session_id: str, image_id: str):
 
 
 @tool_app.post('/annotator/api/images/delete-batch')
-async def annotator_delete_batch_images(data: BatchDeleteImagesBody):
+def annotator_delete_batch_images(data: BatchDeleteImagesBody):
     try:
         result = annotator_manager.delete_images(data.session_id, data.image_ids)
         return {"code": "ok", **result}
@@ -187,7 +188,7 @@ async def annotator_delete_batch_images(data: BatchDeleteImagesBody):
 
 
 @tool_app.post('/annotator/api/images/clear')
-async def annotator_clear_images(data: SessionBody):
+def annotator_clear_images(data: SessionBody):
     try:
         result = annotator_manager.clear_images(data.session_id)
         return {"code": "ok", **result}
@@ -196,19 +197,19 @@ async def annotator_clear_images(data: SessionBody):
 
 
 @tool_app.get('/annotator/api/configs')
-async def annotator_configs():
+def annotator_configs():
     configs = annotator_manager.list_configs()
     return {"code": "ok", "configs": configs}
 
 
 @tool_app.get('/annotator/api/tasks')
-async def annotator_tasks():
+def annotator_tasks():
     tasks = annotator_manager.list_task_names()
     return {"code": "ok", "tasks": tasks}
 
 
 @tool_app.get('/annotator/api/tasks/{task_name}/json')
-async def annotator_task_json_files(task_name: str):
+def annotator_task_json_files(task_name: str):
     try:
         files = annotator_manager.list_task_json_files(task_name)
         return {"code": "ok", "json_files": files}
@@ -217,7 +218,7 @@ async def annotator_task_json_files(task_name: str):
 
 
 @tool_app.get('/annotator/api/rules/schema')
-async def annotator_rule_schema():
+def annotator_rule_schema():
     try:
         data = annotator_manager.rule_schema()
         return {"code": "ok", **data}
@@ -226,7 +227,7 @@ async def annotator_rule_schema():
 
 
 @tool_app.get('/annotator/api/rules/load')
-async def annotator_load_rules(task_name: str, json_relpath: str):
+def annotator_load_rules(task_name: str, json_relpath: str):
     try:
         data = annotator_manager.load_rule_file(task_name, json_relpath)
         return {"code": "ok", **data}
@@ -235,7 +236,7 @@ async def annotator_load_rules(task_name: str, json_relpath: str):
 
 
 @tool_app.get('/annotator/api/rules/source')
-async def annotator_rule_source(dir_path: str = ""):
+def annotator_rule_source(dir_path: str = ""):
     try:
         data = annotator_manager.list_rule_source(dir_path)
         return {"code": "ok", **data}
@@ -244,7 +245,7 @@ async def annotator_rule_source(dir_path: str = ""):
 
 
 @tool_app.post('/annotator/api/rules/source/create')
-async def annotator_rule_source_create(data: RuleFileCreateBody):
+def annotator_rule_source_create(data: RuleFileCreateBody):
     try:
         result = annotator_manager.create_rule_json(data.dir_path, data.file_name)
         return {"code": "ok", **result}
@@ -253,7 +254,7 @@ async def annotator_rule_source_create(data: RuleFileCreateBody):
 
 
 @tool_app.post('/annotator/api/rules/source/delete')
-async def annotator_rule_source_delete(data: RuleFileDeleteBody):
+def annotator_rule_source_delete(data: RuleFileDeleteBody):
     try:
         result = annotator_manager.delete_rule_json(data.dir_path, data.file_name)
         return {"code": "ok", **result}
@@ -262,7 +263,7 @@ async def annotator_rule_source_delete(data: RuleFileDeleteBody):
 
 
 @tool_app.get('/annotator/api/rules/image-preview')
-async def annotator_rule_image_preview(task_name: str, json_relpath: str, image_name: str):
+def annotator_rule_image_preview(task_name: str, json_relpath: str, image_name: str):
     try:
         image = annotator_manager.get_rule_image_file(task_name, json_relpath, image_name)
         return FileResponse(image)
@@ -271,7 +272,7 @@ async def annotator_rule_image_preview(task_name: str, json_relpath: str, image_
 
 
 @tool_app.post('/annotator/api/rules/image/delete')
-async def annotator_rule_image_delete(data: RuleImageDeleteBody):
+def annotator_rule_image_delete(data: RuleImageDeleteBody):
     try:
         result = annotator_manager.delete_rule_image(data.task_name, data.json_relpath, data.image_name)
         return {"code": "ok", **result}
@@ -280,7 +281,7 @@ async def annotator_rule_image_delete(data: RuleImageDeleteBody):
 
 
 @tool_app.post('/annotator/api/emulator/start')
-async def annotator_start_emulator(data: EmulatorStartBody):
+def annotator_start_emulator(data: EmulatorStartBody):
     try:
         status = annotator_manager.start_emulator(data.session_id, data.config_name, data.frame_rate)
         return {"code": "ok", "emulator": status}
@@ -289,7 +290,7 @@ async def annotator_start_emulator(data: EmulatorStartBody):
 
 
 @tool_app.post('/annotator/api/emulator/stop')
-async def annotator_stop_emulator(data: SessionBody):
+def annotator_stop_emulator(data: SessionBody):
     try:
         status = annotator_manager.stop_emulator(data.session_id)
         return {"code": "ok", "emulator": status}
@@ -298,7 +299,7 @@ async def annotator_stop_emulator(data: SessionBody):
 
 
 @tool_app.get('/annotator/api/emulator/status')
-async def annotator_emulator_status(session_id: str):
+def annotator_emulator_status(session_id: str):
     try:
         status = annotator_manager.emulator_status(session_id)
         return {"code": "ok", "emulator": status}
@@ -307,7 +308,7 @@ async def annotator_emulator_status(session_id: str):
 
 
 @tool_app.post('/annotator/api/emulator/capture')
-async def annotator_capture_frame(data: SessionBody):
+def annotator_capture_frame(data: SessionBody):
     try:
         image = annotator_manager.capture_from_emulator(data.session_id)
         return {"code": "ok", "image": image}
@@ -316,7 +317,7 @@ async def annotator_capture_frame(data: SessionBody):
 
 
 @tool_app.post('/annotator/api/rules/test')
-async def annotator_test_rule(data: RuleTestBody):
+def annotator_test_rule(data: RuleTestBody):
     try:
         result = annotator_manager.test_rule(
             session_id=data.session_id,
@@ -333,7 +334,7 @@ async def annotator_test_rule(data: RuleTestBody):
 
 
 @tool_app.post('/annotator/api/rules/save')
-async def annotator_save_rules(data: RuleSaveBody):
+def annotator_save_rules(data: RuleSaveBody):
     try:
         result = annotator_manager.save_rules_and_generate(
             session_id=data.session_id,
@@ -350,7 +351,7 @@ async def annotator_save_rules(data: RuleSaveBody):
 
 
 @tool_app.post('/annotator/api/images/crop-save')
-async def annotator_crop_save(data: CropSaveBody):
+def annotator_crop_save(data: CropSaveBody):
     try:
         result = annotator_manager.save_cropped_image(
             session_id=data.session_id,
@@ -369,12 +370,19 @@ async def annotator_crop_save(data: CropSaveBody):
 async def annotator_frame_ws(websocket: WebSocket, session_id: str):
     await websocket.accept()
     try:
+        if not State.check_webui_key(websocket.query_params.get("key")):
+            await websocket.close(code=1008)
+            return
         annotator_manager.get_session_snapshot(session_id)
+        last_frame_token = None
         while True:
-            frame = annotator_manager.latest_emulator_frame(session_id)
-            if frame:
-                await websocket.send_bytes(frame)
-                continue
+            frame_token = annotator_manager.emulator_frame_token(session_id)
+            if frame_token and frame_token != last_frame_token:
+                frame = annotator_manager.latest_emulator_frame(session_id)
+                if frame:
+                    last_frame_token = frame_token
+                    await websocket.send_bytes(frame)
+                    continue
 
             status = annotator_manager.emulator_status(session_id)
             if status.get("state") == "error":
@@ -388,7 +396,7 @@ async def annotator_frame_ws(websocket: WebSocket, session_id: str):
                 await websocket.close(code=1011)
                 break
 
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
     except WebSocketDisconnect:
         logger.info(f"[annotator] ws disconnect, session={session_id}")
     except AnnotatorError as e:

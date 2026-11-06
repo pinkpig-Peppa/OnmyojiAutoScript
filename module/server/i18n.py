@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 
@@ -27,10 +28,21 @@ class I18n(Addition):
 
     @classmethod
     def save_zh_cn(cls, data) -> None:
+        # 只接受 str -> str 的映射，避免任意 JSON（含列表/嵌套对象）覆盖翻译文件
+        if not isinstance(data, dict):
+            raise ValueError('translation payload must be a dict')
+        for key, value in data.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise ValueError('translation payload must be str -> str')
         I18n.file_zh_cn.parent.mkdir(parents=True, exist_ok=True)
-        with open(str(I18n.file_zh_cn), 'w', encoding='utf-8') as f:
-            s = json.dumps(data, indent=2, ensure_ascii=False, sort_keys=False, default=str)
+        s = json.dumps(data, indent=2, ensure_ascii=False, sort_keys=False, default=str)
+        # 原子写入，避免进程中断后留下截断的翻译文件
+        tmp_path = I18n.file_zh_cn.with_name(I18n.file_zh_cn.name + '.tmp')
+        with open(str(tmp_path), 'w', encoding='utf-8') as f:
             f.write(s)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(str(tmp_path), str(I18n.file_zh_cn))
 
     @classmethod
     def load_zh_cn(cls) -> dict:

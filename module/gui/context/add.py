@@ -58,9 +58,20 @@ class Add(QObject):
         :param template:
         :return:
         """
-        config_path = Path.cwd() / 'config'
-        template_path = config_path / f'{template}.json'
-        file_path = config_path / f'{file}.json'
+        # 配置名只允许 [A-Za-z0-9_-]，避免 ../ 之类的路径穿越
+        _invalid = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+        if not file or file.strip() != file or _invalid.search(file) or file in ('.', '..'):
+            logger.error(f'invalid config name: {file}')
+            return
+        if not template or template.strip() != template or _invalid.search(template) or template in ('.', '..'):
+            logger.error(f'invalid template name: {template}')
+            return
+        config_path = (Path.cwd() / 'config').resolve()
+        template_path = (config_path / f'{template}.json').resolve()
+        file_path = (config_path / f'{file}.json').resolve()
+        if file_path.parent != config_path or template_path.parent != config_path:
+            logger.error(f'config path out of allowed directory: {file}')
+            return
         if file_path.exists():
             logger.error(f'{file_path} is exists')
             return

@@ -10,7 +10,7 @@ from module.gui.context.utils import Utils
 from module.gui.register_type.paint_image import PaintImage
 from module.gui.register_type.rule_file import RuleFile
 from module.gui.fluent_app import FluentApp
-from module.ocr.rpc import ensure_ocr_server_started
+from module.ocr.rpc import ensure_ocr_server_started, shutdown_ocr_server
 
 if __name__ == "__main__":
     ensure_ocr_server_started()
@@ -31,5 +31,8 @@ if __name__ == "__main__":
     app.set_context_property(utils, 'utils')
     app.qml_register_type(PaintImage, 'PaintImage')
     app.qml_register_type(RuleFile, 'RuleFile')
+    # G33: 退出时先停掉所有脚本子进程和 OCR 服务
+    app.add_quit_hook(process_manager.stop_all)
+    app.add_quit_hook(shutdown_ocr_server)
     # 启动一个GUI
     app.run()

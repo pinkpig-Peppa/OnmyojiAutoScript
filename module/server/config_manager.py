@@ -6,6 +6,25 @@ from pathlib import Path
 
 from module.logger import logger
 
+_CONFIG_NAME_PATTERN = re.compile(r'^[^\\/:*?"<>|\x00-\x1f]+$')
+
+
+def safe_config_path(name: str, config_path: Path | None = None) -> Path:
+    """把配置名映射为 config 目录下的 json 路径，拒绝路径分隔符与穿越
+
+    :param name: 不带 .json 后缀的配置名
+    :param config_path: config 目录，默认 Path.cwd() / 'config'
+    """
+    if (not isinstance(name, str) or name in ('', '.', '..')
+            or not _CONFIG_NAME_PATTERN.fullmatch(name) or name != name.strip()):
+        raise ValueError(f'invalid config name: {name!r}')
+    base = (config_path or (Path.cwd() / 'config')).resolve()
+    target = (base / f'{name}.json').resolve()
+    if target.parent != base:
+        raise ValueError(f'invalid config name: {name!r}')
+    return target
+
+
 class ConfigManager:
 
     @staticmethod
@@ -55,8 +74,8 @@ class ConfigManager:
         :return:
         """
         config_path = Path.cwd() / 'config'
-        template_path = config_path / f'{template}.json'
-        file_path = config_path / f'{file}.json'
+        template_path = safe_config_path(template, config_path)
+        file_path = safe_config_path(file, config_path)
         if file_path.exists():
             logger.error(f'{file_path} is exists')
             return
@@ -100,8 +119,8 @@ class ConfigManager:
         :return: True or False
         """
         config_path = Path.cwd() / 'config'
-        old_path = config_path / f'{old_name}.json'
-        new_path = config_path / f'{new_name}.json'
+        old_path = safe_config_path(old_name, config_path)
+        new_path = safe_config_path(new_name, config_path)
         if not old_path.exists():
             logger.error(f'{old_path} is not exists')
             return False
@@ -124,7 +143,7 @@ class ConfigManager:
         :return: True or False
         """
         config_path = Path.cwd() / 'config'
-        file_path = config_path / f'{file}.json'
+        file_path = safe_config_path(file, config_path)
         if not file_path.exists():
             logger.error(f'{file_path} is not exists')
             return False

@@ -33,8 +33,14 @@ class Updater(DeployConfig, GitManager, PipManager):
         else:
             return None
 
+    UNSAFE_SHELL_CHARS = ('|', '&', ';', '$', '`', '\n', '\r', '>', '<')
+
     def execute_output(self, command) -> str:
         command = command.replace(r"\\", "/").replace("\\", "/").replace('"', '"')
+        # 命令由配置项（git 路径 / 分支名）拼接后 shell=True 执行，
+        # 一旦配置值里含 shell 元字符就等价于本机任意命令执行，这里直接拒绝。
+        if any(ch in command for ch in self.UNSAFE_SHELL_CHARS):
+            raise ValueError(f'unsafe characters in git command: {command!r}')
         log = subprocess.run(
             command, capture_output=True, text=True, encoding="utf8", shell=True
         ).stdout

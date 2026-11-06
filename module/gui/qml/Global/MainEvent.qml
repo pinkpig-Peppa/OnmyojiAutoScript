@@ -37,9 +37,19 @@ QtObject {
     }
 
     Component.onCompleted:{
-        var set = JSON.parse(setting.read())
+        var set = {}
+        try {
+            var raw = setting.read()
+            set = (raw && raw !== "") ? JSON.parse(raw) : {}
+        } catch (e) {
+            console.debug('parse setting.json failed: ' + e)
+            set = {}
+        }
+        if (!set || typeof set !== "object" || Array.isArray(set)) {
+            set = {}
+        }
         mainEvent.settings = set
-        if(mainEvent.settings === ""){
+        if(set["displayMode"] === undefined){
             mainEvent.settings = {
                 "displayMode": 1,
                 "darkMode": 2,
@@ -49,10 +59,13 @@ QtObject {
                 "dpiStrategy": ""}
         }
 
+        set = mainEvent.settings
         mainEvent.displayMode = set["displayMode"]
         mainEvent.darkMode = set["darkMode"]
         mainEvent.nativeText = set["nativeText"]
-        mainEvent.language = set["language"]
+        if (set["language"] !== undefined) {
+            mainEvent.language = set["language"]
+        }
         mainEvent.dpiStrategy = set["dpiStrategy"]
         if ('branch' in set){
             mainEvent.branch = set['branch']
@@ -76,7 +89,7 @@ QtObject {
     }
     onDisplayModeChanged: {
 
-        if(mainEvent.settings === ""){
+        if(!mainEvent.settings || typeof mainEvent.settings !== "object"){
             console.debug('display mode and is none')
         }
 
@@ -88,7 +101,7 @@ QtObject {
     }
     onDarkModeChanged: {
 
-        if(mainEvent.settings === ""){
+        if(!mainEvent.settings || typeof mainEvent.settings !== "object"){
             console.debug('darkMode and is none')
         }
         FluTheme.darkMode = mainEvent.darkMode
@@ -99,10 +112,14 @@ QtObject {
         setting.update(JSON.stringify(mainEvent.settings, null, "  "))
     }
     onPrimaryColorChanged: {
-        if(mainEvent.settings === ""){
+        if(!mainEvent.settings || typeof mainEvent.settings !== "object"){
             console.debug('primaryColor and is none')
-            var set = JSON.parse(setting.read())
-            mainEvent.settings = set
+            try {
+                mainEvent.settings = JSON.parse(setting.read())
+            } catch (e) {
+                console.debug('parse setting.json failed: ' + e)
+                mainEvent.settings = {}
+            }
             return
         }
 
@@ -124,7 +141,7 @@ QtObject {
     }
     onNativeTextChanged: {
 
-        if(mainEvent.settings === ""){
+        if(!mainEvent.settings || typeof mainEvent.settings !== "object"){
             console.debug('nativeText and is none')
         }
 
@@ -136,7 +153,7 @@ QtObject {
         setting.update(JSON.stringify(mainEvent.settings, null, "  "))
     }
     onLanguageChanged: {
-        if(mainEvent.settings === ""){
+        if(!mainEvent.settings || typeof mainEvent.settings !== "object"){
             console.debug('language and is none')
         }
 
@@ -149,7 +166,7 @@ QtObject {
 
     }
     onDpiStrategyChanged: {
-        if(mainEvent.settings === ""){
+        if(!mainEvent.settings || typeof mainEvent.settings !== "object"){
             console.debug('dpiStrategy and is none')
         }
         mainEvent.settings["dpiStrategy"] = mainEvent.dpiStrategy

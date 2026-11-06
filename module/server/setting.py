@@ -60,6 +60,18 @@ class State:
 
     restart_event: threading.Event = None
     manager: SyncManager = None
+    # webui 访问口令，为空表示不鉴权（仅建议在 127.0.0.1 上使用时留空）
+    webui_key: str = ""
+    # webui 允许的跨域来源，逗号分隔；为空表示保持旧行为（允许全部来源）
+    webui_cors_origins: str = ""
+
+    @classmethod
+    def check_webui_key(cls, provided) -> bool:
+        """校验 webui 口令，未配置口令时始终通过"""
+        key = cls.webui_key or ""
+        if not key:
+            return True
+        return provided == key
 
     @classmethod
     def init(cls):

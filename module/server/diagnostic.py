@@ -17,6 +17,7 @@ PROJECT_ROOT = Path.cwd().resolve()
 LOG_DIR = PROJECT_ROOT / 'log'
 OUT_DIR = LOG_DIR / 'diagnostic'
 
+_LOG_TAIL_BYTES = 2 * 1024 * 1024
 _RECENT_INSTANCE_LOGS = 4
 _RECENT_SHARED_LOGS = 3
 _RECENT_ERROR_LOGS = 10
@@ -43,6 +44,22 @@ def _scrub(text: str) -> str:
     for pat, repl in _SCRUB_PATTERNS:
         text = pat.sub(repl, text)
     return text
+
+
+def _read_log_tail(path: Path, limit: int = _LOG_TAIL_BYTES) -> str:
+    """只读取日志尾部, 避免超大日志整读占用内存。"""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0
+    with path.open('rb') as f:
+        if size > limit:
+            f.seek(size - limit)
+            prefix = '...[truncated]...\n'
+        else:
+            prefix = ''
+        data = f.read()
+    return prefix + data.decode('utf-8', errors='replace')
 
 
 def _config_summary(name: str) -> dict:
@@ -122,13 +139,13 @@ def build_diagnostic_zip(config_name: str = '') -> Path:
         zf.writestr('summary.json', json.dumps(summary, ensure_ascii=False, indent=2))
         for f in dict.fromkeys(log_files):
             try:
-                zf.writestr(f'log/{f.name}', _scrub(f.read_text(encoding='utf-8', errors='replace')))
+                zf.writestr(f'log/{f.name}', _scrub(_read_log_tail(f)))
             except OSError as e:
                 logger.warning(f'diagnostic: skip {f}: {e}')
         for f in error_logs:
             try:
                 zf.writestr(f'error/{f.parent.name}/log.txt',
-                            _scrub(f.read_text(encoding='utf-8', errors='replace')))
+                            _scrub(_read_log_tail(f)))
             except OSError as e:
                 logger.warning(f'diagnostic: skip {f}: {e}')
 

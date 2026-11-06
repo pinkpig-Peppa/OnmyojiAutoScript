@@ -194,6 +194,7 @@ Item{
         const object = group_item.createObject(contentScrollable)
         if(object === null){
             console.error('Create group item failed!')
+            return
         }
         object.groupName = groupName
         object.groupTitle = qsTr(groupName)

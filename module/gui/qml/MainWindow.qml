@@ -87,7 +87,8 @@ FluWindow {
             nav_view.setCurrentIndex(0)
             items.addFluPaneItems()
 
-            notity.open()
+            // Notity 组件已被注释，调用会报未定义
+            // notity.open()
         }
     }
     Component.onCompleted:{

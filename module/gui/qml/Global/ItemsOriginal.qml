@@ -87,7 +87,8 @@ FluObject{
             if (object !== null) {
                 object.title = configName
                 // 创建成功，可以进行操作
-                children.push(object)
+                // QML list 属性没有 push，必须整体赋值
+                children = children.concat([object])
 //                children.insert(children.length -1, object)
 //                children.splice(children.length-1, object)
             } else {
