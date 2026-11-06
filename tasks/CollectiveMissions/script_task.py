@@ -323,13 +323,20 @@ class ScriptTask(GameUi, CollectiveMissionsAssets):
             2: self.C_CM_3,
         }
         self.ui_click(match_click[index], self.I_SL_SUBMIT)
+        ocr_fail_count = 0
         while 1:
             self.screenshot()
             number_text = self.O_SL_NUMBER.ocr(self.device.image)
             numbers = re.findall(r'\d+', number_text) if number_text else []
             if not numbers:
-                logger.warning('Ocr submit number failed')
+                ocr_fail_count += 1
+                logger.warning(f'Ocr submit number failed ({ocr_fail_count})')
+                if self.ocr_appear(self.O_SL_LEVEL) or ocr_fail_count >= 30:
+                    logger.warning('No soul can be submit or ocr keeps failing')
+                    self.ui_click(self.I_UI_BACK_RED, self.I_CM_RECORDS)
+                    return False
                 continue
+            ocr_fail_count = 0
             submit_number = int(numbers[-1])
             if submit_number > 0:
                 break
