@@ -1,0 +1,14 @@
+[
+  {
+    "itemName": "md_self_boss_slot",
+    "roiFront": "120,140,140,96",
+    "roiBack": "120,140,140,96",
+    "description": "自己发现的鬼王槽位"
+  },
+  {
+    "itemName": "md_friend_boss_area",
+    "roiFront": "60,360,240,220",
+    "roiBack": "60,360,240,220",
+    "description": "好友发现的鬼王列表区域"
+  }
+]
