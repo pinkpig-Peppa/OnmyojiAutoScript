@@ -97,6 +97,35 @@ class ExitFailedMetaDemon(RunThroughMetaDemon):
     exit_result = False
 
 
+class BattlePathMetaDemon(OfflineMetaDemon):
+    """补充战斗路径所需的桩"""
+
+    def ui_click_until_disappear(self, rule, interval=1, **kwargs):
+        self.click(rule)
+
+    def is_in_battle(self, is_screenshot=True):
+        return False
+
+    def is_in_prepare(self, is_screenshot=True):
+        return False
+
+    def random_click_swipt(self):
+        self.events.append("swipt")
+
+    def boss_mark(self):
+        return False
+
+    def boss_mark_reset(self):
+        pass
+
+    def _hook_special_reward(self):
+        return False
+
+    def run_general_battle(self, config=None, buff=None):
+        self.battle_config = config
+        return True
+
+
 class MetaDemonFlowTests(unittest.TestCase):
     def clicks(self, task):
         return [event for event in task.events if not isinstance(event, tuple)]
@@ -206,6 +235,53 @@ class MetaDemonFlowTests(unittest.TestCase):
             task.run()
         self.assertEqual(task.next_run, ("MetaDemon", False))
 
+
+    def test_click_challenge_returns_true_when_button_disappears(self):
+        task = BattlePathMetaDemon()
+        task.pages = [set(), {task.I_MD_CHALLENGE}, {task.I_MD_MAIN}]
+        self.assertTrue(task.click_challenge())
+        self.assertEqual(self.clicks(task), [task.I_MD_CHALLENGE])
+
+    def test_battle_wait_detects_win_and_stops_at_detail_page(self):
+        task = BattlePathMetaDemon()
+        task.pages = [set(), {task.I_WIN}, {task.I_MD_CHALLENGE}]
+        self.assertTrue(task.battle_wait(random_click_swipt_enable=False))
+
+    def test_battle_wait_detects_failure(self):
+        task = BattlePathMetaDemon()
+        task.pages = [set(), {task.I_FALSE}, {task.I_MD_CHALLENGE}]
+        self.assertFalse(task.battle_wait(random_click_swipt_enable=False))
+
+    def test_collect_reward_clicks_reward_button(self):
+        task = BattlePathMetaDemon()
+        task.pages = [set(), {task.I_REWARD}, {task.I_MD_MAIN}]
+        task.collect_reward()
+        self.assertIn(task.I_REWARD, task.events)
+
+    def test_battle_boss_skips_when_challenge_is_not_clickable(self):
+        task = BattlePathMetaDemon()
+        task.current_count = 0
+        with patch.object(task, "click_challenge", return_value=False):
+            self.assertFalse(task.battle_boss([2, 3]))
+
+    def test_battle_boss_restores_current_count_and_preset(self):
+        task = BattlePathMetaDemon()
+        task.current_count = 7
+        with patch.object(task, "click_challenge", return_value=True), \
+                patch.object(task, "wait_battle_enter", return_value=True):
+            self.assertTrue(task.battle_boss([2, 3]))
+        self.assertEqual(task.current_count, 8)
+        self.assertTrue(task.battle_config.preset_enable)
+        self.assertEqual((task.battle_config.preset_group, task.battle_config.preset_team), (2, 3))
+        self.assertFalse(task.battle_config.lock_team_enable)
+
+    def test_battle_boss_without_preset_disables_preset(self):
+        task = BattlePathMetaDemon()
+        task.current_count = 0
+        with patch.object(task, "click_challenge", return_value=True), \
+                patch.object(task, "wait_battle_enter", return_value=True):
+            self.assertTrue(task.battle_boss(None))
+        self.assertFalse(task.battle_config.preset_enable)
 
 if __name__ == "__main__":
     unittest.main()
