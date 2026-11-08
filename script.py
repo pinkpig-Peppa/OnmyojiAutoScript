@@ -58,6 +58,10 @@ class Script:
         # Failure count of tasks
         # Key: str, task name, value: int, failure count
         self.failure_record = {}
+        # 上一次任务是否因为“游戏卡死/页面未知”而失败。失败时只 task_call('Restart') 是不够的：
+        # get_next_task 取 next_run 最早的任务，过期任务（如 next_run 停在几小时前）永远优先，
+        # Restart 抢不到执行权，于是会反复跑同一个失败任务。置位后由 loop 强制下一轮跑 Restart。
+        self._force_restart = False
         # 运行loop的线程
         self.loop_thread: Thread = None
         # 跨进程排队管理器（仅在 queue_mode=True 时初始化）
@@ -512,7 +516,13 @@ class Script:
             return True
 
         logger.info("Goto main page during wait")
-        self.run("GotoMain")
+        if not self.run("GotoMain"):
+            # 空闲期回主界面失败（典型原因：庭院镜头偏移导致页面识别全灭）时不要直接
+            # wait_until(next_run)，否则会静默等待几个小时、日志毫无输出。先重启游戏恢复画面。
+            logger.warning('GotoMain during wait failed, run `Restart` to recover the game')
+            self.config.task_call('Restart')
+            self._force_restart = False  # 已就地重启；若 Restart 也失败，run() 会重新置位
+            self.run("Restart")
         self.device.release_during_wait()
         return self.wait_until(next_run)
 
@@ -588,6 +598,7 @@ class Script:
             logger.warning('If you are playing by hand, please stop Alas')
             self.config.notifier.push(title=f'{I18n.trans_zh_cn(command)}{command}', content=f"<{self.config_name}> GameStuckError or GameTooManyClickError")
             self.config.task_call('Restart')
+            self._force_restart = True
             self.device.sleep(10)
             return False
         except GameBugError as e:
@@ -607,6 +618,7 @@ class Script:
             self.exception_handler(e=e, command=command)
             self.config.notifier.push(title=f'{I18n.trans_zh_cn(command)}{command}', content=f"<{self.config_name}> GamePageUnknownError")
             self.config.task_call('Restart')
+            self._force_restart = True
             self.device.sleep(10)
             return False
         except ScriptError as e:
@@ -682,6 +694,13 @@ class Script:
 
             # Get task
             task = self.get_next_task()
+            # 上一轮因游戏卡死/页面未知而失败：此时 task_call('Restart') 把 Restart 的 next_run 设成
+            # “现在”，但 get_next_task 取的是 next_run 最早的任务，过期任务的 next_run 更早，Restart
+            # 依旧排不上号。这里直接改写成 Restart，保证游戏能先被重启恢复。
+            if self._force_restart:
+                self._force_restart = False
+                logger.info('Last task failed with a game error, run `Restart` before the next task')
+                task = 'Restart'
             # Skip first restart
             if self.is_first_task and task == 'Restart':
                 logger.info('Skip task `Restart` at scheduler start')

@@ -67,7 +67,13 @@ page_login = Page(SwitchAccountAssets.I_CHECK_LOGIN_FORM, category="global")
 page_login.add_enter_success_hooks(handle_login_page)
 
 # 庭院主页(此处通过提高阈值来处理部分探索章节会识别成原始庭院的问题, 后续有其他更好方法需改善)
-page_main = Page(GameUiAssets.I_CHECK_MAIN, category="global")
+# 补充：I_CHECK_MAIN 只是固定视角下的 76x45 天空+鸟居小图，阈值 0.95，庭院镜头被拖动/缩放后
+# 会掉到 0.94~0.66，导致 51 个页面全部识别失败（2026-11-08 22:12 事故）。底部功能栏的
+# “式神录/阴阳术”图标属于固定 HUD，不随镜头移动，两者同时命中即认定为主界面。
+page_main = Page(any_of(
+    GameUiAssets.I_CHECK_MAIN,
+    all_of(GameUiAssets.I_MAIN_GOTO_SHIKIGAMI_RECORDS, GameUiAssets.I_MAIN_GOTO_ONMYODO),
+), category="global")
 page_main.add_enter_success_hooks(
     GameUiAssets.I_AD_CLOSE_RED, GlobalGameAssets.I_UI_BACK_RED, GlobalGameAssets.I_UI_CANCEL_SAMLL,
     conditional_action(RestartAssets.I_LOGIN_COURTYARD, RestartAssets.C_LOGIN_SCROLL_CLOSE_AREA),
