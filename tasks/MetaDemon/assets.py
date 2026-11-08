@@ -19,7 +19,7 @@ class MetaDemonAssets:
 	# 从主界面右侧活动栏进入超鬼王活动 
 	I_MD_RIGHT_ENTER = RuleImage(roi_front=(1163,202,92,74), roi_back=(1090,110,190,430), threshold=0.8, method="Template matching", file="./tasks/MetaDemon/md/md_right_enter.png")
 	# 主界面右侧活动栏展开收起按钮 
-	I_MD_TOGGLE_BUTTON = RuleImage(roi_front=(1189,525,38,34), roi_back=(1150,495,130,100), threshold=0.75, method="Template matching", file="./tasks/MetaDemon/md/md_toggle_button.png")
+	I_MD_TOGGLE_BUTTON = RuleImage(roi_front=(1189,525,38,34), roi_back=(1150,240,140,380), threshold=0.75, method="Template matching", file="./tasks/MetaDemon/md/md_toggle_button.png")
 	# 超鬼王活动首页标题（祸至无日） 
 	I_MD_ACTIVITY_TITLE = RuleImage(roi_front=(144,10,134,46), roi_back=(0,0,360,90), threshold=0.8, method="Template matching", file="./tasks/MetaDemon/md/md_activity_title.png")
 	# 活动首页进入祸主降临玩法 

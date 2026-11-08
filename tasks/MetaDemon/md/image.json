@@ -12,7 +12,7 @@
     "itemName": "md_toggle_button",
     "imageName": "md_toggle_button.png",
     "roiFront": "1189,525,38,34",
-    "roiBack": "1150,495,130,100",
+    "roiBack": "1150,240,140,380",
     "method": "Template matching",
     "threshold": 0.75,
     "description": "主界面右侧活动栏展开收起按钮"

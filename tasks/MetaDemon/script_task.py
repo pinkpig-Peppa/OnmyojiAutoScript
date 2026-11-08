@@ -14,7 +14,7 @@ from tasks.Component.GeneralBattle.general_battle import GeneralBattle
 from tasks.Component.RightActivity.right_activity import RightActivity
 from tasks.Component.SwitchSoul.switch_soul import SwitchSoul
 from tasks.GameUi.game_ui import GameUi
-from tasks.GameUi.page import page_main, page_shikigami_records
+from tasks.GameUi.page import page_main, page_shikigami_records, random_click
 from tasks.MetaDemon.assets import MetaDemonAssets
 from tasks.MetaDemon.config import Strategy
 
@@ -118,6 +118,8 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
     BATTLE_WAIT_TIMEOUT = 240
     # 连续多久没有任何有效动作就退出
     IDLE_TIMEOUT = 40
+    # 活动栏“换一批”按钮最多点击次数，需要翻页到出现超鬼王图标
+    MAX_TOGGLE_CLICKS = 12
 
     def run(self):
         if self.config.meta_demon.switch_soul.enable:
@@ -195,7 +197,7 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
                 return False
             if result == 1:
                 continue
-            result = self.fallback_click(self.I_MD_TOGGLE_BUTTON, 2, counts)
+            result = self.fallback_click(self.I_MD_TOGGLE_BUTTON, 2, counts, limit=self.MAX_TOGGLE_CLICKS)
             if result == 2:
                 logger.error('Too many clicks on the activity toggle')
                 return False
@@ -227,6 +229,7 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
         idle_timer = Timer(self.IDLE_TIMEOUT)
         idle_timer.start()
         battle_failures = 0
+        result_page_fail = 0
         summon_count = 0
         summon_dialog_close = 0
         counts = {}
@@ -238,6 +241,23 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
             if idle_timer.reached():
                 logger.warning('Unable to leave current page, exit')
                 break
+            # 残留的战斗胜利结算页：点击屏幕继续，避免卡死
+            if self.appear(self.I_WIN, threshold=0.8) or self.appear(self.I_DE_WIN):
+                logger.info('Close battle result page')
+                if self.appear(self.I_DE_WIN):
+                    self.ui_click_until_disappear(self.I_DE_WIN)
+                    closed = not self.appear(self.I_DE_WIN)
+                else:
+                    closed = self.click_win_result()
+                if closed is False:
+                    result_page_fail += 1
+                    if result_page_fail >= 2:
+                        logger.warning('Victory result page cannot be closed, exit')
+                        break
+                else:
+                    result_page_fail = 0
+                idle_timer.reset()
+                continue
             # 自己或者好友的鬼王详情页
             if self.appear(self.I_MD_CHALLENGE):
                 if self.exhaustion_full():
@@ -461,6 +481,9 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
                 logger.info('Battle result is win')
                 if self.appear(self.I_DE_WIN):
                     self.ui_click_until_disappear(self.I_DE_WIN)
+                else:
+                    # 新版超鬼王的胜利结算页没有奖励按钮，需要点击屏幕继续
+                    self.click_win_result()
                 self.collect_reward()
                 return True
             if self.appear(self.I_FALSE, threshold=0.8) or self.appear(self.I_MD_BATTLE_FAILURE):
@@ -480,13 +503,35 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
         logger.warning('Battle wait time out')
         return False
 
+    def click_win_result(self, timeout: float = 10) -> bool:
+        """
+        新版超鬼王的胜利结算页（胜利横幅 + 本次伤害/累计伤害）没有任何按钮，
+        需要点击屏幕任意位置继续。这里持续点击胜利横幅直到它消失
+        @return: 胜利横幅是否已经消失
+        """
+        logger.info('Click win result page')
+        timer = Timer(timeout)
+        timer.start()
+        while not timer.reached():
+            self.screenshot()
+            if not self.appear(self.I_WIN, threshold=0.8):
+                return True
+            # 点击间隔 2.5s，避免同一控件在 15 次点击窗口内堆到连点上限
+            self.appear_then_click(self.I_WIN,
+                                   action=random.choice([self.C_WIN_1, self.C_WIN_2, self.C_WIN_3]),
+                                   interval=2.5)
+        result = not self.appear(self.I_WIN, threshold=0.8)
+        if not result:
+            logger.warning('Win result page is still visible')
+        return result
+
     def collect_reward(self, timeout: float = 20):
         """
         点击战斗结算奖励，直到回到详情页或者主界面。
         点击逻辑对齐 GeneralBattle.battle_wait 的领奖段（鼓/金币/庆祝/特殊奖励）
         """
         # 与 GeneralBattle.battle_wait 一致：先等奖励图标出现，避免结算加载空帧直接跳过领奖
-        if not self.wait_until_appear(self.I_REWARD, wait_time=10):
+        if not self.wait_until_appear(self.I_REWARD, wait_time=5):
             if not self.appear(self.I_STATISTICS):
                 logger.warning('No reward button appeared, skip collect')
                 return
@@ -566,33 +611,63 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
         timer = Timer(30)
         timer.start()
         counts = {}
+        no_action = 0
+        random_clicks = 0
         while not timer.reached():
             self.screenshot()
             if self.appear(self.I_CHECK_MAIN):
                 logger.info('Back to main page')
                 return True
+            # 胜利结算页没有返回按钮，只能点击屏幕继续
+            if self.appear(self.I_WIN, threshold=0.8) or self.appear(self.I_DE_WIN):
+                if self.appear(self.I_DE_WIN):
+                    self.ui_click_until_disappear(self.I_DE_WIN)
+                else:
+                    self.click_win_result(timeout=6)
+                no_action = 0
+                continue
+            if self.appear(self.I_REWARD, threshold=0.6) or self.appear(self.I_REWARD_GOLD, threshold=0.8):
+                self.collect_reward(timeout=8)
+                no_action = 0
+                continue
             result = self.fallback_click(self.I_UI_BACK_YELLOW, 1.5, counts)
             if result == 2:
                 logger.warning('Too many clicks on the back button, stop exiting')
-                return False
+                break
             if result == 1:
+                no_action = 0
                 continue
             result = self.fallback_click(self.I_UI_BACK_RED, 1.5, counts)
             if result == 2:
                 logger.warning('Too many clicks on the red back button, stop exiting')
-                return False
+                break
             if result == 1:
+                no_action = 0
                 continue
             result = self.fallback_click(self.I_MD_RED_BACK, 1.5, counts)
             if result == 2:
                 logger.warning('Too many clicks on the close button, stop exiting')
-                return False
+                break
             if result == 1:
+                no_action = 0
                 continue
             if self.ui_reward_appear_click():
+                no_action = 0
                 continue
-        logger.warning('Exit MetaDemon time out')
-        return False
+            # 完全没有已知控件时有限次点击屏幕安全区域推进未知页面，避免连点风控
+            no_action += 1
+            if no_action >= 8 and random_clicks < 4:
+                self.click(random_click())
+                random_clicks += 1
+                no_action = 0
+        logger.warning('Exit MetaDemon time out, fallback to main page')
+        # 兜底：交给页面导航器回到主界面，避免任务结束后游戏卡在未知页面
+        try:
+            self.goto_page(page_main)
+        except Exception as e:
+            logger.warning(f'Goto main page failed: {e}')
+            return False
+        return bool(self.appear(self.I_CHECK_MAIN))
 
 
 if __name__ == '__main__':

@@ -346,6 +346,43 @@ class MetaDemonFlowTests(unittest.TestCase):
             task.run_meta_demon()
         self.assertEqual(battle.call_count, 3)
 
+    def test_enter_keeps_flipping_activity_bar_until_icon_appears(self):
+        """活动栏需要翻多页才出现超鬼王图标时，不能因为兜底点击上限提前失败"""
+        task = OfflineMetaDemon()
+        task.pages = [{task.I_MD_TOGGLE_BUTTON}] * 35 + [
+            {task.I_MD_RIGHT_ENTER}, {task.I_MD_ENTER2}, {task.I_MD_MAIN}]
+        self.assertTrue(task.enter_meta_demon())
+        toggle_clicks = self.clicks(task).count(task.I_MD_TOGGLE_BUTTON)
+        self.assertGreaterEqual(toggle_clicks, 6)
+        self.assertEqual(self.clicks(task)[-2:], [task.I_MD_RIGHT_ENTER, task.I_MD_ENTER2])
+
+    def test_click_win_result_page_taps_banner_until_it_disappears(self):
+        task = BattlePathMetaDemon()
+        task.pages = [{task.I_WIN}] * 12 + [set()]
+        self.assertTrue(task.click_win_result())
+        self.assertGreaterEqual(self.clicks(task).count(task.I_WIN), 2)
+
+    def test_battle_wait_taps_victory_overlay_before_reward(self):
+        """新版结算页没有奖励按钮，胜利横幅必须被点掉，不能直接返回"""
+        task = BattlePathMetaDemon()
+        task.pages = [set()] + [{task.I_WIN}] * 12 + [{task.I_MD_CHALLENGE}]
+        self.assertTrue(task.battle_wait(random_click_swipt_enable=False))
+        self.assertGreaterEqual(self.clicks(task).count(task.I_WIN), 2)
+        self.assertLess(task.frames, 300)
+
+    def test_exit_dismisses_victory_overlay_before_leaving(self):
+        task = BattlePathMetaDemon()
+        task.pages = [{task.I_WIN}] * 12 + [{task.I_CHECK_MAIN}]
+        self.assertTrue(task.exit_meta_demon())
+        self.assertGreaterEqual(self.clicks(task).count(task.I_WIN), 2)
+
+    def test_run_meta_demon_closes_leftover_victory_overlay(self):
+        task = BattlePathMetaDemon()
+        task.pages = [{task.I_WIN}] * 12 + [{task.I_MD_CHALLENGE}]
+        with patch.object(task, "exhaustion_full", return_value=True):
+            task.run_meta_demon()
+        self.assertGreaterEqual(self.clicks(task).count(task.I_WIN), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
