@@ -9,6 +9,15 @@
     "description": "活动总览左侧活动列表中的“祸至无日”入口"
   },
   {
+    "itemName": "md_settling",
+    "roiFront": "600,430,340,100",
+    "roiBack": "600,430,340,100",
+    "mode": "Full",
+    "method": "Default",
+    "keyword": "结算中",
+    "description": "战斗结束后“击败奖励结算中”提示"
+  },
+  {
     "itemName": "md_exhaustion",
     "roiFront": "1122,22,100,36",
     "roiBack": "1122,22,100,36",

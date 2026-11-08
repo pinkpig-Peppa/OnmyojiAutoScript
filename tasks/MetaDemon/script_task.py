@@ -281,6 +281,12 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
                     result_page_fail = 0
                 idle_timer.reset()
                 continue
+            # 击败奖励结算中：等待其结束，避免重复点击鬼王槽位触发连点风控
+            if self.ocr_appear(self.O_MD_SETTLING):
+                logger.info('Battle reward settling, wait')
+                boss_timer.reset()
+                idle_timer.reset()
+                continue
             # 自己或者好友的鬼王详情页
             if self.appear(self.I_MD_CHALLENGE):
                 if self.exhaustion_full():

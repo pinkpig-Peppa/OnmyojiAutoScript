@@ -388,6 +388,15 @@ class MetaDemonFlowTests(unittest.TestCase):
         self.assertTrue(task.exit_meta_demon())
         self.assertGreaterEqual(self.clicks(task).count(task.I_WIN), 2)
 
+    def test_run_meta_demon_waits_while_battle_reward_is_settling(self):
+        """战斗结束后“击败奖励结算中”期间不能重复点击鬼王槽位"""
+        task = BattlePathMetaDemon()
+        task.pages = [{task.O_MD_SETTLING}] * 5 + [{task.I_MD_MAIN}]
+        with patch.object(task, "exhaustion_full", return_value=True):
+            task.run_meta_demon()
+        self.assertEqual(self.clicks(task), [])
+        self.assertLess(task.frames, 300)
+
     def test_run_meta_demon_closes_leftover_victory_overlay(self):
         task = BattlePathMetaDemon()
         task.pages = [{task.I_WIN}] * 12 + [{task.I_MD_CHALLENGE}]

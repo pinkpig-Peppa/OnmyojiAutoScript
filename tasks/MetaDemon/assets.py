@@ -53,6 +53,8 @@ class MetaDemonAssets:
 	# Ocr Rule Assets
 	# 活动总览左侧活动列表中的“祸至无日”入口 
 	O_MD_ACT_ENTRY = RuleOcr(roi=(0,80,215,480), area=(0,80,215,480), mode="Full", method="Default", keyword="祸至无日", name="md_act_entry")
+	# 战斗结束后“击败奖励结算中”提示 
+	O_MD_SETTLING = RuleOcr(roi=(600,430,340,100), area=(600,430,340,100), mode="Full", method="Default", keyword="结算中", name="md_settling")
 	# 疲劳值 
 	O_MD_EXHAUSTION = RuleOcr(roi=(1122,22,100,36), area=(1122,22,100,36), mode="DigitCounter", method="Default", keyword="", name="md_exhaustion")
 	# 召唤弹窗标题 
