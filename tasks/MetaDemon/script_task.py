@@ -495,22 +495,34 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
         missing_reward = 0
         while not timer.reached():
             self.screenshot()
+            action_reward = random.choice([self.C_REWARD_1, self.C_REWARD_2, self.C_REWARD_3])
             if self.appear(self.I_OVER_GHOST):
                 self.click(self.I_OVER_GHOST)
                 missing_reward = 0
                 continue
-            action_click = random.choice([self.C_REWARD_1, self.C_REWARD_2, self.C_REWARD_3])
-            if self.appear_then_click(self.I_REWARD, action=action_click, interval=1.5) or \
-                    self.appear_then_click(self.I_REWARD_GOLD, action=action_click, interval=1.5):
+            if self.appear(self.I_REWARD) and \
+                    self.appear_then_click(self.I_REWARD, action=action_reward, interval=1.5):
+                missing_reward = 0
+                continue
+            if self.appear(self.I_REWARD_GOLD) and \
+                    self.appear_then_click(self.I_REWARD_GOLD, action=action_reward, interval=1.5):
                 missing_reward = 0
                 continue
             if self._hook_special_reward():
                 missing_reward = 0
                 continue
-            if self.appear_then_click(self.I_WIN, interval=1.0):
+            if self.appear(self.I_WIN) and \
+                    self.appear_then_click(self.I_WIN,
+                                           action=random.choice([self.C_WIN_1, self.C_WIN_2, self.C_WIN_3]),
+                                           interval=1.0):
                 missing_reward = 0
                 continue
             if self.ui_reward_appear_click():
+                missing_reward = 0
+                continue
+            # 奖励/胜利控件仍然可见时只是处于点击冷却期，不算消失
+            if self.appear(self.I_REWARD) or self.appear(self.I_REWARD_GOLD) or \
+                    self.appear(self.I_OVER_GHOST) or self.appear(self.I_WIN):
                 missing_reward = 0
                 continue
             missing_reward += 1

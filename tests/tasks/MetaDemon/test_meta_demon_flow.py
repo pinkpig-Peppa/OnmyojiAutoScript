@@ -329,6 +329,14 @@ class MetaDemonFlowTests(unittest.TestCase):
         task.collect_reward()
         self.assertNotIn(task.I_REWARD, task.events)
 
+    def test_collect_reward_clicks_reward_multiple_times_during_cooldown(self):
+        task = BattlePathMetaDemon()
+        task.pages = [set(), {task.I_REWARD}, {task.I_REWARD}, {task.I_REWARD},
+                      {task.I_REWARD}, {task.I_REWARD}, {task.I_MD_MAIN}]
+        task.collect_reward()
+        # 奖励图标连续出现时应持续点击，而不是在点击冷却期误判为“奖励消失”
+        self.assertGreaterEqual(self.clicks(task).count(task.I_REWARD), 2)
+
     def test_run_meta_demon_stops_after_three_battle_failures(self):
         task = BattlePathMetaDemon()
         task.pages = [{task.I_MD_CHALLENGE}]
