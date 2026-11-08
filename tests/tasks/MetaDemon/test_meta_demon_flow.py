@@ -356,6 +356,18 @@ class MetaDemonFlowTests(unittest.TestCase):
         self.assertGreaterEqual(toggle_clicks, 6)
         self.assertEqual(self.clicks(task)[-2:], [task.I_MD_RIGHT_ENTER, task.I_MD_ENTER2])
 
+    def test_enter_uses_activity_overview_when_activity_bar_has_no_flip_button(self):
+        """活动栏展开成大图标、看不到“换一批”按钮时，改走“活动总览”入口"""
+        task = OfflineMetaDemon()
+        act_page = {task.I_CHECK_ACT_LIST, task.O_MD_ACT_ENTRY, task.I_ACT_LIST_GOTO_ACT}
+        task.pages = [set(), {task.I_ACT_LIST_EXPAND}, act_page, act_page,
+                      {task.I_MD_ENTER2}, {task.I_MD_MAIN}]
+        self.assertTrue(task.enter_meta_demon())
+        clicked = self.clicks(task)
+        self.assertIn(task.I_ACT_LIST_EXPAND, clicked)
+        self.assertIn(task.O_MD_ACT_ENTRY, clicked)
+        self.assertIn(task.I_ACT_LIST_GOTO_ACT, clicked)
+
     def test_click_win_result_page_taps_banner_until_it_disappears(self):
         task = BattlePathMetaDemon()
         task.pages = [{task.I_WIN}] * 12 + [set()]

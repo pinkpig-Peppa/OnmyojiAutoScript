@@ -175,6 +175,7 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
         timer = Timer(60)
         timer.start()
         counts = {}
+        act_entry_selected = False
         while 1:
             self.screenshot()
             if self.appear(self.I_MD_MAIN):
@@ -197,6 +198,28 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
                 return False
             if result == 1:
                 continue
+            # 活动栏翻页也可能找不到图标（展开状态没有“换一批”按钮），改走“活动总览”
+            result = self.fallback_click(self.I_ACT_LIST_EXPAND, 2, counts)
+            if result == 2:
+                logger.error('Too many clicks on the activity overview button')
+                return False
+            if result == 1:
+                continue
+            if self.appear(self.I_CHECK_ACT_LIST):
+                # 活动总览：先选中“祸至无日”，再点击“前往活动”
+                if not act_entry_selected:
+                    if self.ocr_appear(self.O_MD_ACT_ENTRY):
+                        self.click(self.O_MD_ACT_ENTRY, interval=1.5)
+                    else:
+                        self.click(self.C_MD_ACT_FIRST_ITEM, interval=1.5)
+                    act_entry_selected = True
+                    continue
+                result = self.fallback_click(self.I_ACT_LIST_GOTO_ACT, 2, counts, limit=8)
+                if result == 2:
+                    logger.error('Too many clicks on the go to activity button')
+                    return False
+                if result == 1:
+                    continue
             result = self.fallback_click(self.I_MD_TOGGLE_BUTTON, 2, counts, limit=self.MAX_TOGGLE_CLICKS)
             if result == 2:
                 logger.error('Too many clicks on the activity toggle')

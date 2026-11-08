@@ -13,6 +13,8 @@ class MetaDemonAssets:
 	C_MD_SELF_BOSS_SLOT = RuleClick(roi_front=(120,140,140,96), roi_back=(120,140,140,96), name="md_self_boss_slot")
 	# 好友发现的鬼王列表区域 
 	C_MD_FRIEND_BOSS_AREA = RuleClick(roi_front=(60,360,240,220), roi_back=(60,360,240,220), name="md_friend_boss_area")
+	# 活动总览左侧列表第一个活动（版本活动“祸至无日”） 
+	C_MD_ACT_FIRST_ITEM = RuleClick(roi_front=(20,105,190,70), roi_back=(20,105,190,70), name="md_act_first_item")
 
 
 	# Image Rule Assets
@@ -49,6 +51,8 @@ class MetaDemonAssets:
 
 
 	# Ocr Rule Assets
+	# 活动总览左侧活动列表中的“祸至无日”入口 
+	O_MD_ACT_ENTRY = RuleOcr(roi=(0,80,215,480), area=(0,80,215,480), mode="Full", method="Default", keyword="祸至无日", name="md_act_entry")
 	# 疲劳值 
 	O_MD_EXHAUSTION = RuleOcr(roi=(1122,22,100,36), area=(1122,22,100,36), mode="DigitCounter", method="Default", keyword="", name="md_exhaustion")
 	# 召唤弹窗标题 

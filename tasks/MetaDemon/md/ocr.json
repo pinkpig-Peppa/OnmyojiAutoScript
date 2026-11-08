@@ -1,5 +1,14 @@
 [
   {
+    "itemName": "md_act_entry",
+    "roiFront": "0,80,215,480",
+    "roiBack": "0,80,215,480",
+    "mode": "Full",
+    "method": "Default",
+    "keyword": "祸至无日",
+    "description": "活动总览左侧活动列表中的“祸至无日”入口"
+  },
+  {
     "itemName": "md_exhaustion",
     "roiFront": "1122,22,100,36",
     "roiBack": "1122,22,100,36",
