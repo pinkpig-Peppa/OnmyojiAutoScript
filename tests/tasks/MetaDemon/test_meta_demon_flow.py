@@ -18,6 +18,7 @@ class OfflineMetaDemon(ScriptTask):
         self.pages = []
         self.friend_detail_at = None
         self.now = 100.0
+        self.last_click = {}
         self.device = SimpleNamespace(
             image=None,
             click=lambda *args, **kwargs: None,
@@ -56,8 +57,21 @@ class OfflineMetaDemon(ScriptTask):
     def appear_then_click(self, rule, interval=None, **kwargs):
         if rule not in self.page():
             return False
+        # 对齐真实实现：interval 未到时不点击并返回 False
+        name = str(getattr(rule, "name", rule))
+        last = self.last_click.get(name)
+        if interval and last is not None and self.now - last < interval:
+            return False
+        self.last_click[name] = self.now
         self.click(rule, interval=interval)
         return True
+
+    def wait_until_appear(self, rule, wait_time=None, **kwargs):
+        for _ in range(20):
+            if self.appear(rule):
+                return True
+            self.screenshot()
+        return self.appear(rule)
 
     def ocr_appear(self, rule, **kwargs):
         return rule in self.page()
@@ -254,7 +268,7 @@ class MetaDemonFlowTests(unittest.TestCase):
 
     def test_collect_reward_clicks_reward_button(self):
         task = BattlePathMetaDemon()
-        task.pages = [set(), {task.I_REWARD}, {task.I_MD_MAIN}]
+        task.pages = [set(), {task.I_REWARD}, {task.I_REWARD}, {task.I_MD_MAIN}]
         task.collect_reward()
         self.assertIn(task.I_REWARD, task.events)
 
@@ -282,6 +296,48 @@ class MetaDemonFlowTests(unittest.TestCase):
                 patch.object(task, "wait_battle_enter", return_value=True):
             self.assertTrue(task.battle_boss(None))
         self.assertFalse(task.battle_config.preset_enable)
+
+    def test_fallback_click_counts_only_real_clicks(self):
+        task = BattlePathMetaDemon()
+        task.pages = [{task.I_UI_BACK_RED}]
+        counts = {}
+        name = task.I_UI_BACK_RED.name
+        self.assertEqual(task.fallback_click(task.I_UI_BACK_RED, 2, counts), 1)
+        self.assertEqual(counts, {name: 1})
+        # interval 未到：出现但未点击，不增加计数
+        for _ in range(4):
+            self.assertEqual(task.fallback_click(task.I_UI_BACK_RED, 2, counts), 1)
+        self.assertEqual(counts, {name: 1})
+        # interval 到点后继续累计，超过上限返回 2
+        task.now += 3
+        for expected in (2, 3, 4, 5):
+            task.now += 3
+            self.assertEqual(task.fallback_click(task.I_UI_BACK_RED, 2, counts), 1)
+            self.assertEqual(counts[name], expected)
+        task.now += 3
+        self.assertEqual(task.fallback_click(task.I_UI_BACK_RED, 2, counts), 2)
+
+    def test_collect_reward_waits_loading_frames_before_clicking_reward(self):
+        task = BattlePathMetaDemon()
+        task.pages = [set(), {task.I_REWARD}, {task.I_REWARD}, {task.I_MD_MAIN}]
+        task.collect_reward()
+        self.assertIn(task.I_REWARD, task.events)
+
+    def test_collect_reward_returns_without_reward_when_statistics_shown(self):
+        task = BattlePathMetaDemon()
+        task.pages = [{task.I_STATISTICS}]
+        task.collect_reward()
+        self.assertNotIn(task.I_REWARD, task.events)
+
+    def test_run_meta_demon_stops_after_three_battle_failures(self):
+        task = BattlePathMetaDemon()
+        task.pages = [{task.I_MD_CHALLENGE}]
+        with patch.object(task, "exhaustion_full", return_value=False), \
+                patch.object(task, "battle_from_detail", return_value=False) as battle, \
+                patch.object(task, "leave_detail", return_value=True):
+            task.run_meta_demon()
+        self.assertEqual(battle.call_count, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

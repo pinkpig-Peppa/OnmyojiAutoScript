@@ -155,8 +155,9 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
         name = str(getattr(rule, 'name', rule))
         if counts.get(name, 0) >= limit:
             return 2
-        self.appear_then_click(rule, interval=interval)
-        counts[name] = counts.get(name, 0) + 1
+        # 只有真正发生了点击才计数：interval 未到时 appear_then_click 不会点击
+        if self.appear_then_click(rule, interval=interval):
+            counts[name] = counts.get(name, 0) + 1
         return 1
 
     def enter_meta_demon(self) -> bool:
@@ -484,26 +485,38 @@ class ScriptTask(RightActivity, GeneralBattle, SwitchSoul, MetaDemonStrategy):
         点击战斗结算奖励，直到回到详情页或者主界面。
         点击逻辑对齐 GeneralBattle.battle_wait 的领奖段（鼓/金币/庆祝/特殊奖励）
         """
+        # 与 GeneralBattle.battle_wait 一致：先等奖励图标出现，避免结算加载空帧直接跳过领奖
+        if not self.wait_until_appear(self.I_REWARD, wait_time=10):
+            if not self.appear(self.I_STATISTICS):
+                logger.warning('No reward button appeared, skip collect')
+                return
         timer = Timer(timeout)
         timer.start()
+        missing_reward = 0
         while not timer.reached():
             self.screenshot()
-            if self.appear(self.I_MD_CHALLENGE) or self.appear(self.I_MD_MAIN) or self.appear(self.I_CHECK_MAIN):
-                break
             if self.appear(self.I_OVER_GHOST):
                 self.click(self.I_OVER_GHOST)
+                missing_reward = 0
                 continue
             action_click = random.choice([self.C_REWARD_1, self.C_REWARD_2, self.C_REWARD_3])
             if self.appear_then_click(self.I_REWARD, action=action_click, interval=1.5) or \
                     self.appear_then_click(self.I_REWARD_GOLD, action=action_click, interval=1.5):
+                missing_reward = 0
                 continue
             if self._hook_special_reward():
+                missing_reward = 0
                 continue
             if self.appear_then_click(self.I_WIN, interval=1.0):
+                missing_reward = 0
                 continue
             if self.ui_reward_appear_click():
+                missing_reward = 0
                 continue
-            break
+            missing_reward += 1
+            # 奖励资源连续两帧都不出现，认为结算已经结束（回到详情页/主界面）
+            if missing_reward >= 2:
+                break
 
     def exhaustion_full(self) -> bool:
         """
