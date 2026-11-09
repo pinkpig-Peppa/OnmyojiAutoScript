@@ -119,8 +119,11 @@ def poor_yaml_write(data, file, template_file=DEPLOY_TEMPLATE):
         if text:
             # 用 lambda 做替换值，避免 value 中的反斜杠被当成正则转义；
             # 同时兼容模板最后一行没有换行符的情况
-            new_text, count = re.subn(rf'^{re.escape(str(key))}:.*?$',
-                                      lambda m, k=key, v=value: f'{k}: {v}',
+            # 模板里的配置项都缩进在对应的分组下（如 `    Repository: ...`），
+            # 只锚定行首的 `^key:` 匹配不到它们，导致每个配置项都被追加到文件末尾，
+            # 形成「模板 + 扁平副本」的重复内容。这里允许前导空白，并原样保留缩进。
+            new_text, count = re.subn(rf'^([ \t]*){re.escape(str(key))}:(.*)$',
+                                      lambda m, k=key, v=value: f'{m.group(1)}{k}: {v}',
                                       text, count=1, flags=re.M)
             if count:
                 text = new_text
