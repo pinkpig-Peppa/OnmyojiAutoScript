@@ -104,6 +104,7 @@ T = TypeVar('T')
 
 class HookSignal(Enum):
     CONTINUE = auto()  # 无事发生
+    BUSY = auto()  # 处理了，继续
     DONE = auto()  # 流程结束
 
 
@@ -339,6 +340,15 @@ class PerTaskPrepare:
 class PerTaskPreset:
     # 一次任务类型触发一次，想要再次触发把done设置False
     done: bool = False
+
+    @classmethod
+    def reset_preset_state(cls, owner: 'BattleWait') -> None:
+        if runtime.task_owner is not owner:
+            # runtime 还没绑定到本任务，per_task 会在首个钩子调用时整体重建，这里无需处理
+            return
+        for hook_name, ctx in runtime.pri_ctx.items():
+            if runtime.hook2event(hook_name) == 'preset':
+                ctx.per_task = cls()
 
 
 @dataclass
@@ -861,8 +871,6 @@ class runtime:
     def reset_per_battle(cls):
         cls._ensure_pub_default()
         cls.pub_ctx.per_battle = PerBattleState()
-        # reward 卡死轮次属于单场战斗，跨战斗不累计
-        cls.pub_ctx.cross.pop('reward_stuck_rounds', None)
         for hook_name, ctx in cls.pri_ctx.items():
             event = cls.hook2event(hook_name)
             cls_type = _PER_BATTLE_CLASSES.get(event, dict)
@@ -1108,31 +1116,6 @@ class BattleWait(BaseTask, GeneralBattleAssets):
     # ------------------------------------------------------------------------------------------------------------------
     # build in
     # ------------------------------------------------------------------------------------------------------------------
-    # 结算界面长时间不退出时的兜底：内层 reward 循环每 20s 记为一次，
-    # 超过上限就按“胜利”推进到 completion，避免 success hook 被外层 while
-    # 反复重入而导致战斗永远不结束。
-    REWARD_STUCK_ROUND_LIMIT = 3
-
-    # 战斗等待的硬性总时长（秒）：所有 hook 都识别不到胜负界面时也必须退出。
-    BATTLE_WAIT_TIMEOUT = 3600
-
-    def _bw_reward_stuck_round_reached(self, pub: PublicContext) -> bool:
-        rounds = pub.cross.get('reward_stuck_rounds', 0) + 1
-        pub.cross['reward_stuck_rounds'] = rounds
-        logger.warning(
-            'Reward screen not cleared within 20s '
-            f'(round {rounds}/{self.REWARD_STUCK_ROUND_LIMIT})'
-        )
-        return rounds >= self.REWARD_STUCK_ROUND_LIMIT
-
-    def _bw_reward_force_finish(self, pub: PublicContext) -> HookSignal:
-        logger.warning('Reward screen stuck; finish this battle as success')
-        pub.per_battle.success = BattleResult.SUCCESS
-        return runtime.hook_enabled_update(
-            enable=('completion',),
-            disable=tuple(['success', 'failure']),
-        )
-
     def _bw_setup_default(self, pub: PublicContext, pri: PrivateContext) -> HookSignal:
         self.C_REWARD_1.name = 'C_REWARD'
         self.C_REWARD_2.name = 'C_REWARD'
@@ -1163,9 +1146,8 @@ class BattleWait(BaseTask, GeneralBattleAssets):
         if state.fallback_timer is None:
             state.fallback_timer = Timer(3).start()
         if state.fallback_cnt >= 5:
-            # 兜底退出不代表战斗胜利，不能累加 per_task.count 伪造成功次数
-            logger.warning('Completion check images not found after fallback clicks, '
-                           'give up without counting this battle')
+            pub.per_task.count += 1
+            logger.info('Fallback timer expired')
             return HookSignal.DONE
         if not isinstance(state.fallback_timer, Timer):
             raise
@@ -1244,8 +1226,7 @@ class BattleWait(BaseTask, GeneralBattleAssets):
                     disable=tuple(['success', 'failure']),
                 )
             if timer.reached_and_reset():
-                if self._bw_reward_stuck_round_reached(pub):
-                    return self._bw_reward_force_finish(pub)
+                logger.warning('battle')
                 break
         return HookSignal.CONTINUE
 
@@ -1319,9 +1300,8 @@ class BattleWait(BaseTask, GeneralBattleAssets):
         if not pri_options.preset_enable or state.done:
             return HookSignal.CONTINUE
         logger.info("Preset is enable")
-        # 点击预设按钮（最多 20 秒，避免预设面板打不开时永久循环）
-        preset_open_timer = Timer(20).start()
-        while not preset_open_timer.reached():
+        # 点击预设按钮
+        while 1:
             self.screenshot()
             if self.appear(self.I_PRESET_ENSURE):
                 break
@@ -1338,8 +1318,6 @@ class BattleWait(BaseTask, GeneralBattleAssets):
             if self.ocr_appear(self.O_PRESET_FULL):
                 self.click(self.O_PRESET_FULL, interval=1)
                 continue
-        if preset_open_timer.reached():
-            logger.warning('Preset panel not opened within 20s')
         logger.info("Click preset button")
 
         def get_unselect_color(tmp1, tmp2, tmp3, size):
@@ -1360,15 +1338,13 @@ class BattleWait(BaseTask, GeneralBattleAssets):
             return color_3
 
         # 选择预设组
-        tmp = getattr(self, "C_PRESET_GROUP_" + str(pri_options.preset_group), None)
+        tmp = self.__getattribute__("C_PRESET_GROUP_" + str(pri_options.preset_group))
         if tmp is None:
             tmp = self.C_PRESET_GROUP_1
         color_size = [self.C_PRESET_GROUP_1.roi_back[2],
                       self.C_PRESET_GROUP_1.roi_back[3]]
         unselected_color = (224.9, 208.3, 187.4)
-        # 颜色一直判为“未选中”时最多重试 10 秒，避免分辨率/皮肤差异导致死循环
-        group_color_timer = Timer(10).start()
-        while not group_color_timer.reached():
+        while True:
             self.screenshot()
             color_tmp = get_color(self.device.image,
                                   (tmp.roi_back[0], tmp.roi_back[1], tmp.roi_back[0] + color_size[0],
@@ -1377,19 +1353,16 @@ class BattleWait(BaseTask, GeneralBattleAssets):
                 self.click(tmp, interval=0.2)
                 continue
             break
-        if group_color_timer.reached():
-            logger.warning('Preset group color not matched within 10s')
         logger.info("Select preset group")
 
         # 选择预设的队伍
         time.sleep(0.5)
-        tmp = getattr(self, "C_PRESET_TEAM_" + str(pri_options.preset_team), None)
+        tmp = self.__getattribute__("C_PRESET_TEAM_" + str(pri_options.preset_team))
         if tmp is None:
             tmp = self.C_PRESET_TEAM_1
         color_size = [5, 5]
         unselected_color = (216.8, 185.0, 146.8)
-        team_color_timer = Timer(10).start()
-        while not team_color_timer.reached():
+        while True:
             self.screenshot()
             color_tmp = get_color(self.device.image,
                                   (tmp.roi_back[0], tmp.roi_back[1], tmp.roi_back[0] + color_size[0],
@@ -1398,16 +1371,13 @@ class BattleWait(BaseTask, GeneralBattleAssets):
                 self.click(tmp, interval=0.2)
                 continue
             break
-        if team_color_timer.reached():
-            logger.warning('Preset team color not matched within 10s')
         self.click(tmp)
         logger.info("Select preset team")
 
         # 点击预设确认
         self.wait_until_appear(self.I_PRESET_ENSURE, wait_time=1)
         click_timer = Timer(4).start()
-        ensure_timer = Timer(20).start()
-        while not ensure_timer.reached():
+        while 1:
             self.screenshot()
             if click_timer.reached():
                 logger.warning("Switch preset failure")
@@ -1415,8 +1385,6 @@ class BattleWait(BaseTask, GeneralBattleAssets):
                 break
             if self.appear_then_click(self.I_PRESET_ENSURE, threshold=0.8, interval=1):
                 continue
-        if ensure_timer.reached():
-            logger.warning('Preset ensure still visible after 20s, give up')
         logger.info("Click preset ensure")
         state.done = True
         return runtime.hook_enabled_update(
@@ -1438,14 +1406,11 @@ class BattleWait(BaseTask, GeneralBattleAssets):
                 disable=('green',),
             )
 
-        # 等待那个准备的消失（最多等 20 秒，避免停在准备界面或掉线时永久循环）
-        prepare_wait_timer = Timer(20).start()
-        while not prepare_wait_timer.reached():
+        # 等待那个准备的消失
+        while 1:
             self.screenshot()
             if not self.appear(self.I_PREPARE_HIGHLIGHT):
                 break
-        if prepare_wait_timer.reached():
-            logger.warning('Prepare highlight still visible after 20s, skip waiting')
 
         if pri_options.green_mark_type == GreenMarkEnum.NAME:
             name = pri_options.green_mark_name
@@ -1604,8 +1569,7 @@ class BattleWait(BaseTask, GeneralBattleAssets):
                     disable=tuple(['success', 'failure']),
                 )
             if timer.reached_and_reset():
-                if self._bw_reward_stuck_round_reached(pub):
-                    return self._bw_reward_force_finish(pub)
+                logger.warning('battle ')
                 break
         return HookSignal.CONTINUE
 
@@ -1660,8 +1624,7 @@ class BattleWait(BaseTask, GeneralBattleAssets):
                 )
 
             if timer.reached_and_reset():
-                if self._bw_reward_stuck_round_reached(pub):
-                    return self._bw_reward_force_finish(pub)
+                logger.warning('battle ')
                 break
         return HookSignal.CONTINUE
 
@@ -1702,27 +1665,10 @@ class BattleWait(BaseTask, GeneralBattleAssets):
             enable=(),
             disable=('setup',),
         )
-        handlers = []
-        for func_name in battle_wait_plan.sequence_function_names():
-            handler = getattr(self, func_name, None)
-            if handler is None:
-                # 策略名拼错时 getattr 会静默返回 None，随后 handler.__name__ 才炸，
-                # 报错信息完全定位不到错误的策略，这里直接给出可读的失败原因。
-                raise ValueError(
-                    f'Battle wait hook is not implemented: {func_name}; '
-                    f'check the strategy names in battle_wait_plan.sequence={battle_wait_plan.sequence!r}'
-                )
-            handlers.append(handler)
+        handlers = [getattr(self, func_name, None) for func_name in battle_wait_plan.sequence_function_names()]
         self.setup_hook(handlers=handlers)
 
-        battle_wait_timer = Timer(self.BATTLE_WAIT_TIMEOUT, count=1).start()
         while True:
-            if battle_wait_timer.reached():
-                logger.warning(
-                    f'Battle wait timeout ({self.BATTLE_WAIT_TIMEOUT}s), '
-                    'assume battle finished'
-                )
-                return runtime.pub_ctx.per_battle.success == BattleResult.SUCCESS
             self.screenshot()
             hook_enabled = runtime.hook_enabled()
             # self.state_show()

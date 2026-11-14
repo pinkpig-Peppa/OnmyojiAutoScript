@@ -234,8 +234,12 @@ class GeneralBattleAssets:
 	I_GB_SKIN_CONFIRM = RuleImage(roi_front=(594,447,90,55), roi_back=(594,447,90,55), threshold=0.8, method="Template matching", file="./tasks/Component/GeneralBattle/gb/gb_gb_skin_confirm.png")
 	# 队伍退出确认弹窗(移植自mine) 
 	I_GB_CHECK_TEAM_EXIT = RuleImage(roi_front=(507,288,270,54), roi_back=(411,233,452,247), threshold=0.8, method="Template matching", file="./tasks/Component/GeneralBattle/gb/gb_gb_check_team_exit.png")
-	# 契灵结算弹窗(移植自mine) 
+	# 契灵结算弹窗(移植自mine)
 	I_OVER_GHOST = RuleImage(roi_front=(697,409,89,32), roi_back=(697,409,89,32), threshold=0.8, method="Template matching", file="./tasks/Component/GeneralBattle/gb/gb_over_ghost.png")
+	# 显示是锁队伍的图标(移植自nearaura)
+	I_TEAM_LOCK = RuleImage(roi_front=(1135,379,26,31), roi_back=(728,354,470,341), threshold=0.8, method="Template matching", file="./tasks/Component/GeneralBattle/lock/lock_team_lock.png")
+	# 显示是没有锁队伍的图标(移植自nearaura)
+	I_TEAM_UNLOCK = RuleImage(roi_front=(1136,379,25,27), roi_back=(724,346,472,342), threshold=0.8, method="Template matching", file="./tasks/Component/GeneralBattle/lock/lock_team_unlock.png")
 
 
 	# Ocr Rule Assets

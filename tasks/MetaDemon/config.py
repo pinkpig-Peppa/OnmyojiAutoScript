@@ -76,10 +76,10 @@ class Strategy(ConfigBase):
 class MetaDemonConfig(ConfigBase):
     meta_crafting_card: bool = Field(default=True, description='craft_essence_help')
     auto_tea: bool = Field(default=False, description='auto_tea_help')
+    auto_shared_boss: bool = Field(default=True, description='auto_shared_boss_help')
     # extreme_notify: bool = Field(default=False, description='extreme_notify_help')
     md_strategy_count: int = Field(default=0, ge=0, description='md_strategy_count_help')
     md_use_strategy: bool = Field(default=False, description='md_use_strategy_help')
-    md_low_hp_threshold: int = Field(default=40, ge=0, le=100, description='md_low_hp_threshold_help')
 
     @field_validator('auto_tea', mode='after')
     @classmethod

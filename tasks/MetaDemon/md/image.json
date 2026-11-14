@@ -1,137 +1,20 @@
 [
   {
-    "itemName": "md_right_enter",
-    "imageName": "md_right_enter.png",
-    "roiFront": "1163,202,92,74",
-    "roiBack": "1090,110,190,430",
-    "method": "Template matching",
-    "threshold": 0.8,
-    "description": "从主界面右侧活动栏进入超鬼王活动"
-  },
-  {
-    "itemName": "md_toggle_button",
-    "imageName": "md_toggle_button.png",
-    "roiFront": "1189,525,38,34",
-    "roiBack": "1150,240,140,380",
-    "method": "Template matching",
-    "threshold": 0.75,
-    "description": "主界面右侧活动栏展开收起按钮"
-  },
-  {
-    "itemName": "md_activity_title",
-    "imageName": "md_activity_title.png",
-    "roiFront": "144,10,134,46",
-    "roiBack": "0,0,360,90",
-    "method": "Template matching",
-    "threshold": 0.8,
-    "description": "超鬼王活动首页标题（祸至无日）"
-  },
-  {
-    "itemName": "md_enter2",
-    "imageName": "md_enter2.png",
-    "roiFront": "892,56,98,214",
-    "roiBack": "850,30,200,320",
-    "method": "Template matching",
-    "threshold": 0.75,
-    "description": "活动首页进入祸主降临玩法"
-  },
-  {
-    "itemName": "md_main",
-    "imageName": "md_main_title.png",
-    "roiFront": "152,17,130,38",
-    "roiBack": "0,0,360,90",
-    "method": "Template matching",
-    "threshold": 0.8,
-    "description": "祸主降临玩法主界面标题"
-  },
-  {
-    "itemName": "md_boss_empty",
-    "imageName": "md_boss_empty.png",
-    "roiFront": "137,141,78,80",
-    "roiBack": "45,128,270,105",
-    "method": "Template matching",
-    "threshold": 0.7,
-    "description": "自己发现的鬼王空槽位"
-  },
-  {
-    "itemName": "md_friend_empty",
-    "imageName": "md_friend_empty.png",
-    "roiFront": "127,423,102,99",
-    "roiBack": "60,400,250,160",
-    "method": "Template matching",
-    "threshold": 0.7,
-    "description": "好友发现的鬼王空状态"
-  },
-  {
-    "itemName": "md_find_demon",
-    "imageName": "md_find_demon.png",
-    "roiFront": "1105,543,158,160",
-    "roiBack": "1080,520,200,200",
-    "method": "Template matching",
-    "threshold": 0.8,
-    "description": "召唤鬼王按钮"
-  },
-  {
-    "itemName": "md_crafting_1",
-    "imageName": "md_crafting_1.png",
-    "roiFront": "1186,214,70,68",
-    "roiBack": "1160,200,120,90",
-    "method": "Template matching",
-    "threshold": 0.8,
-    "description": "合成按钮"
-  },
-  {
-    "itemName": "md_summon_now",
-    "imageName": "md_summon_now.png",
-    "roiFront": "547,446,187,48",
-    "roiBack": "520,420,260,110",
-    "method": "Template matching",
-    "threshold": 0.75,
-    "description": "召唤弹窗中的立即召唤按钮"
-  },
-  {
-    "itemName": "md_red_back",
-    "imageName": "md_red_back.png",
-    "roiFront": "1002,158,44,40",
-    "roiBack": "960,130,140,110",
-    "method": "Template matching",
-    "threshold": 0.8,
-    "description": "关闭弹窗的红色叉号"
-  },
-  {
-    "itemName": "md_challenge",
-    "imageName": "md_challenge.png",
-    "roiFront": "1135,570,100,80",
-    "roiBack": "1110,545,170,160",
-    "method": "Template matching",
-    "threshold": 0.75,
-    "description": "鬼王详情页挑战按钮"
-  },
-  {
-    "itemName": "md_boss_convene",
-    "imageName": "md_boss_convene.png",
-    "roiFront": "243,150,61,59",
-    "roiBack": "230,140,95,80",
-    "method": "Template matching",
-    "threshold": 0.7,
-    "description": "鬼王详情页集结按钮"
-  },
-  {
     "itemName": "md_battle_failure",
     "imageName": "md_md_battle_failure.png",
     "roiFront": "412,105,100,100",
     "roiBack": "412,105,100,100",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "战斗失败"
+    "description": "失败"
   },
   {
-    "itemName": "md_enter_ensure",
-    "imageName": "md_enter_ensure.png",
-    "roiFront": "541,578,186,48",
-    "roiBack": "443,555,370,100",
+    "itemName": "md_win",
+    "imageName": "md_md_win.png",
+    "roiFront": "691,55,236,170",
+    "roiBack": "668,32,282,216",
     "method": "Template matching",
     "threshold": 0.8,
-    "description": "通用确认按钮"
+    "description": ""
   }
 ]
