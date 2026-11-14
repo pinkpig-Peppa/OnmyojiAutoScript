@@ -422,3 +422,15 @@ async def annotator_frame_ws(websocket: WebSocket, session_id: str):
             pass
 
 
+# -------------------------------------- 一键体检 --------------------------------------
+@tool_app.get('/doctor')
+async def tool_doctor(config_name: str = ''):
+    """OAS 环境一键体检: 只读检查运行环境, 返回 pass/warn/fail 与修复建议。"""
+    from module.server.doctor import run_doctor
+    try:
+        return await asyncio.to_thread(run_doctor, config_name)
+    except Exception as e:
+        logger.exception(e)
+        return {'ok': False, 'error': str(e), 'summary': {}, 'checks': []}
+
+
