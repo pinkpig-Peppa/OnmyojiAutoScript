@@ -5,7 +5,7 @@ import time
 import cv2
 import numpy as np
 
-from ppocronnx.predict_system import BoxedResult
+from module.ocr.common import BoxedResult
 from enum import Enum
 
 
@@ -14,6 +14,7 @@ from module.base.utils import area_pad, crop, float2str
 from typing import Any
 
 from module.ocr.models import get_ocr_model
+from module.ocr.text_validation import is_numeric_text, keyword_indices
 from module.exception import ScriptError
 from module.logger import logger
 
@@ -42,8 +43,43 @@ class OcrMode(Enum):
     DURATION = 5  # str: "Duration"
     QUANTITY = 6  # str: "Quantity"
 
-class OcrMethod(Enum):
-    DEFAULT = 1  # str: "Default"
+
+class OcrMethodType(Enum):
+    # 默认，不需要预处理
+    DEFAULT = "DEFAULT"
+    # # 颜色过滤Color Filter
+    # 配置相关CF_RGB(lower, upper)
+    # lower ,upper 格式为6位16进制，例如FFFFFF
+    # 过滤图片中颜色，仅保留符合指定范围（lower到upper）的颜色
+    CF_HSV = "CF_HSV"
+    # 与CF_HSV  相似
+    CF_RGB = "CF_RGB"
+
+
+class OcrMethod:
+    _reg = r"([^()]+)\((.*?)\)?$"
+
+    def __init__(self, val: str = None):
+        self._method_type: OcrMethodType = OcrMethodType.DEFAULT
+        self._val: str = val
+        if val is None:
+            return
+        import re
+        match = re.match(self._reg, val)
+        if not match:
+            return
+        type_str = match.group(1).upper()
+        if type_str not in OcrMethodType.__members__:
+            return
+        self._method_type = OcrMethodType[type_str]
+        self._val = match.group(2)
+
+    def get_method_type(self):
+        return self._method_type
+
+    def get_val(self):
+        return self._val
+
 
 class BaseCor:
 
@@ -53,7 +89,7 @@ class BaseCor:
 
     name: str = "ocr"
     mode: OcrMode = OcrMode.FULL
-    method: OcrMethod = OcrMethod.DEFAULT  # 占位符
+    method: OcrMethod = OcrMethod()
     roi: list = []  # [x, y, width, height]
     area: list = []  # [x, y, width, height]
     keyword: str = ""  # 默认为空
@@ -81,7 +117,7 @@ class BaseCor:
         elif isinstance(mode, OcrMode):
             self.mode = mode
         if isinstance(method, str):
-            self.method = OcrMethod[method.upper()]
+            self.method = OcrMethod(method.upper())
         elif isinstance(method, OcrMethod):
             self.method = method
         self.roi: list = list(roi)
@@ -134,15 +170,21 @@ class BaseCor:
         # pre process
         start_time = time.time()
         image = self.pre_process(image)
+        # image = enlarge_canvas(image)
         # ocr
         result, score = self.model.ocr_single_line(image)
         if score < self.score:
             result = ""
         # after proces
         result = self.after_process(result)
-        # logger.info("ocr result score: %s%s" % (result,score))
-        logger.attr(name='%s %ss' % (self.name, float2str(time.time() - start_time)),
-                    text=f'[{result}]')
+        logger.debug("ocr result score: %s %s" % (result, score))
+        logger.debug(
+            '[%s %ss] [%s]' % (
+                self.name,
+                float2str(time.time() - start_time),
+                result,
+            )
+        )
         return result
 
     def ocr_single_line(self, image):
@@ -156,26 +198,32 @@ class BaseCor:
         start_time = time.time()
         image = self.crop(image, self.roi)
         image = self.pre_process(image)
+        # image = enlarge_canvas(image)
         # ocr
         result, score = self.model.ocr_single_line(image)
-        contains_digit = any(char.isdigit() for char in result)
+        numeric_text_valid = is_numeric_text(result, self.mode.name)
 
         if score >= self.score:
             pass
-        elif score >= self.min_score and contains_digit and self.mode in [OcrMode.DIGIT, OcrMode.DIGITCOUNTER,
+        elif score >= self.min_score and numeric_text_valid and self.mode in [OcrMode.DIGIT, OcrMode.DIGITCOUNTER,
                                                                           OcrMode.QUANTITY]:
             logger.warning(
-                f'[{self.name}] Score {score:.2f} is low, but result "{result}" contains a digit. Accepting it.')
+                f'[{self.name}] Score {score:.2f} is low, but result "{result}" has a complete numeric format. Accepting it.')
         else:
             result = ""
         # after proces
         result = self.after_process(result)
-        # logger.info("ocr result score: %s" % score)
-        logger.attr(name='%s %ss' % (self.name, float2str(time.time() - start_time)),
-                    text=f'[{result}]')
+        logger.debug("ocr result score: %s %s" % (result, score))
+        logger.debug(
+            '[%s %ss] [%s]' % (
+                self.name,
+                float2str(time.time() - start_time),
+                result,
+            )
+        )
         return result
 
-    def detect_and_ocr(self, image, logDisplay: bool = True) -> list[BoxedResult]:
+    def detect_and_ocr(self, image, logDisplay: bool = True, **kwargs) -> list[BoxedResult]:
         """
         注意：这里使用了预处理和后处理
         :param image:
@@ -185,21 +233,26 @@ class BaseCor:
         start_time = time.time()
         image = self.crop(image, self.roi)
         image = self.pre_process(image)
-        image = enlarge_canvas(image)
+        # image = enlarge_canvas(image)
 
         # ocr
-        boxed_results: list[BoxedResult] = self.model.detect_and_ocr(image)
+        boxed_results: list[BoxedResult] = self.model.detect_and_ocr(image, **kwargs)
         results = []
         # after proces
         for result in boxed_results:
-            # logger.info("ocr result score: %s" % result.score)
+            logger.debug("ocr result score: %s %s" % (result.ocr_text, result.score))
             if result.score < self.score:
                 continue
             result.ocr_text = self.after_process(result.ocr_text)
             results.append(result)
         if logDisplay:
-            logger.attr(name='%s %ss' % (self.name, float2str(time.time() - start_time)),
-                        text=str([result.ocr_text for result in results]))
+            logger.debug(
+                '[%s %ss] %s' % (
+                    self.name,
+                    float2str(time.time() - start_time),
+                    str([result.ocr_text for result in results]),
+                )
+            )
         return results
 
     def match(self, result: str, included: bool=False) -> bool:
@@ -214,48 +267,16 @@ class BaseCor:
         else:
             return self.keyword == result
 
-    def filter(self, boxed_results: list[BoxedResult], keyword: str=None, exact: bool=False) -> list or None:
+    def filter(self, boxed_results: list[BoxedResult], keyword: str=None) -> list:
         """
         使用ocr获取结果后和keyword进行匹配. 返回匹配的index list
         :param keyword: 如果不指定默认适用对象的keyword
         :param boxed_results:
-        :param exact: 是否只匹配完整的单个 OCR 文本
         :return:
         """
-        # 首先先将所有的ocr的str顺序拼接起来, 然后再进行匹配
-        result = None
-        strings = [boxed_result.ocr_text for boxed_result in boxed_results]
-        concatenated_string = "".join(strings)
         if keyword is None:
             keyword = self.keyword
-        if exact:
-            result = [index for index, word in enumerate(strings) if word == keyword]
-            return result or None
-        elif keyword in concatenated_string:
-            result = [index for index, word in enumerate(strings) if keyword in word]
-        else:
-            result = None
-
-        if result is not None:
-            # logger.info("Filter result: %s" % result)
-            return result
-
-        # 如果适用顺序拼接还是没有匹配到，那可能是竖排的，使用单个字节的keyword进行匹配
-        indices = []
-        # 对于keyword中的每一个字符，都要在strings中进行匹配
-        # 如果这个字符在strings中的某一个string中，那么就记录这个string的index
-        for index, char in enumerate(keyword):
-            for i, string in enumerate(strings):
-                if char not in string:
-                    continue
-                indices.append(i)
-                break
-        if indices:
-            # 去重但保持顺序：list(set()) 无序会让多框合并结果不稳定
-            indices = list(dict.fromkeys(indices))
-            return indices
-        else:
-            return None
+        return keyword_indices(boxed_results, keyword)
 
     def detect_text(self, image) -> str:
         """
@@ -267,19 +288,24 @@ class BaseCor:
         start_time = time.time()
         image = self.crop(image, self.roi)
         image = self.pre_process(image)
-        image = enlarge_canvas(image)
+        # image = enlarge_canvas(image)
         # ocr
         boxed_results: list[BoxedResult] = self.model.detect_and_ocr(image)
         results = ''
         # after proces
         for result in boxed_results:
-            # logger.info("ocr result score: %s" % result.score)
+            logger.debug("ocr result score: %s %s" % (result.ocr_text, result.score))
             if result.score < self.score:
                 continue
             results += result.ocr_text
         # logger.info("ocr result score: %s" % score)
-        logger.attr(name='%s %ss' % (self.name, float2str(time.time() - start_time)),
-                    text=f'[{results}]')
+        logger.debug(
+            '[%s %ss] [%s]' % (
+                self.name,
+                float2str(time.time() - start_time),
+                results,
+            )
+        )
         return results
 
 
