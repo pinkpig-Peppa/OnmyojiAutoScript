@@ -1,92 +1,56 @@
 [
   {
-    "itemName": "md_act_entry",
-    "roiFront": "0,80,215,480",
-    "roiBack": "0,80,215,480",
-    "mode": "Full",
-    "method": "Default",
-    "keyword": "祸至无日",
-    "description": "活动总览左侧活动列表中的“祸至无日”入口"
-  },
-  {
-    "itemName": "md_settling",
-    "roiFront": "600,430,340,100",
-    "roiBack": "600,430,340,100",
-    "mode": "Full",
-    "method": "Default",
-    "keyword": "结算中",
-    "description": "战斗结束后“击败奖励结算中”提示"
-  },
-  {
     "itemName": "md_exhaustion",
-    "roiFront": "1122,22,100,36",
-    "roiBack": "1122,22,100,36",
+    "roiFront": "1114,24,94,31",
+    "roiBack": "1114,24,94,31",
     "mode": "DigitCounter",
     "method": "Default",
     "keyword": "",
-    "description": "疲劳值"
+    "description": "Ocr-description"
   },
   {
-    "itemName": "md_summon_title",
-    "roiFront": "435,145,395,55",
-    "roiBack": "435,145,395,55",
-    "mode": "Full",
+    "itemName": "md_ticket",
+    "roiFront": "923,18,82,30",
+    "roiBack": "923,18,82,30",
+    "mode": "DigitCounter",
     "method": "Default",
-    "keyword": "裂变之眼召唤队列",
-    "description": "召唤弹窗标题"
+    "keyword": "",
+    "description": "Ocr-description"
+  },
+  {
+    "itemName": "md_count_info",
+    "roiFront": "94,314,161,37",
+    "roiBack": "94,314,161,37",
+    "mode": "Single",
+    "method": "Default",
+    "keyword": "击败奖励结算中",
+    "description": "Ocr-description"
+  },
+  {
+    "itemName": "crafting_card_1",
+    "roiFront": "303,158,161,33",
+    "roiBack": "303,158,161,33",
+    "mode": "Single",
+    "method": "Default",
+    "keyword": "一星梦告铃鼓",
+    "description": "一星卡"
   },
   {
     "itemName": "md_full_name",
-    "roiFront": "510,196,62,84",
-    "roiBack": "510,196,62,84",
-    "mode": "Single",
+    "roiFront": "479,116,100,217",
+    "roiBack": "479,116,100,217",
+    "mode": "Full",
     "method": "Default",
     "keyword": "",
-    "description": "鬼王名字"
+    "description": "式神全名"
   },
   {
-    "itemName": "md_left_time_label",
-    "roiFront": "145,164,95,26",
-    "roiBack": "145,164,95,26",
-    "mode": "Full",
+    "itemName": "boss_empty_1",
+    "roiFront": "141,400,94,32",
+    "roiBack": "141,400,94,32",
+    "mode": "Single",
     "method": "Default",
     "keyword": "剩余时间",
-    "description": "自己发现鬼王剩余时间标签"
-  },
-  {
-    "itemName": "md_hp",
-    "roiFront": "688,508,132,28",
-    "roiBack": "688,508,132,28",
-    "mode": "Full",
-    "method": "Default",
-    "keyword": "",
-    "description": "鬼王血量"
-  },
-  {
-    "itemName": "md_hp_percent",
-    "roiFront": "505,504,58,38",
-    "roiBack": "505,504,58,38",
-    "mode": "Digit",
-    "method": "Default",
-    "keyword": "",
-    "description": "鬼王血量百分比"
-  },
-  {
-    "itemName": "md_friend_empty_text",
-    "roiFront": "85,552,190,32",
-    "roiBack": "85,552,190,32",
-    "mode": "Single",
-    "method": "Default",
-    "keyword": "暂无好友发现鬼王",
-    "description": "好友发现暂无鬼王"
-  },
-  {
-    "itemName": "md_friend_list",
-    "roiFront": "30,340,315,285",
-    "roiBack": "30,340,315,285",
-    "mode": "Full",
-    "method": "Default",
-    "keyword": "",
-    "description": "好友发现的鬼王列表"
+    "description": "判断别人是否给鬼王"
   }
 ]
