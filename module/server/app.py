@@ -6,6 +6,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 import argparse
+import asyncio
 from starlette import status
 from starlette.responses import JSONResponse
 from fastapi import FastAPI, Request
@@ -15,8 +16,11 @@ from module.logger import logger
 from module.server.home_router import home_app
 from module.server.script_router import script_app
 from module.server.tool_router import tool_app
+from module.server.stats_router import stats_app
+from module.server.log_router import log_app
 from module.server.setting import State
 from module.server.main_manager import mm
+from module.server.watchdog import watchdog_loop
 from starlette.staticfiles import StaticFiles
 
 
@@ -73,6 +77,8 @@ async def webui_key_middleware(request: Request, call_next):
 
 app.include_router(home_app)
 app.include_router(script_app)
+app.include_router(stats_app)
+app.include_router(log_app)
 app.include_router(tool_app)
 
 annotator_static_dir = Path(__file__).resolve().parent / "web" / "annotator" / "static"
@@ -104,9 +110,14 @@ async def on_startup():
     logger.info('OAS web service startup done')
     if getattr(app.state, 'script_instances', None):
         await mm.restart_processes(app.state.script_instances)
+    # 看门狗: 周期检测脚本进程意外退出与任务超时未运行
+    app.state.watchdog_task = asyncio.create_task(watchdog_loop(), name='watchdog')
 
 
 async def on_shutdown():
+    task = getattr(app.state, 'watchdog_task', None)
+    if task is not None:
+        task.cancel()
     logger.info('OAS web service shutdown done')
 
 
