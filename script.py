@@ -111,15 +111,14 @@ class Script:
         from module.handler.sensitive_info import (handle_sensitive_image,
                                                    handle_sensitive_logs)
         if self.config.script.error.save_error:
-            if not os.path.exists('./log/error'):
-                os.mkdir('./log/error')
+            os.makedirs('./log/error', exist_ok=True)
             folder_name = str(int(time.time() * 1000))
             folder = f'./log/error/{folder_name}'
             logger.warning(f'Saving error: {folder}')
             logger.info('保存详细错误的日志和截图到路径:')
             logger.info(f'{str( Path.cwd() / "log" / "error" / folder_name)}')
-            os.mkdir(folder)
-            for data in self.device.screenshot_deque:
+            os.makedirs(folder, exist_ok=True)
+            for data in list(self.device.screenshot_deque):
                 image_time = datetime.strftime(data['time'], '%Y-%m-%d_%H-%M-%S-%f')
                 image = handle_sensitive_image(data['image'])
                 save_image(image, f'{folder}/{image_time}.png')
@@ -130,7 +129,7 @@ class Script:
                     line = line.strip(' \r\t\n')
                     if re.match('^═{15,}$', line):
                         start = index
-                lines = lines[start - 2:]
+                lines = lines[max(0, start - 2):]
                 lines = handle_sensitive_logs(lines)
             with open(f'{folder}/log.txt', 'w', encoding='utf-8') as f:
                 f.writelines(lines)

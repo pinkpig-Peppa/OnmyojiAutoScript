@@ -154,7 +154,7 @@ class Window(Handle):
                 result.append(self.root_node.children[1].num)
                 result.append(self.root_node.children[1].children[1].num)
                 result.append(self.root_node.children[1].children[1].children[0].num)
-            except:
+            except IndexError:
                 result.append(self.root_node.children[2].num)
                 result.append(self.root_node.children[2].children[1].num)
                 result.append(self.root_node.children[2].children[1].children[0].num)

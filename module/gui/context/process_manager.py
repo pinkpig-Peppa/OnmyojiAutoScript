@@ -37,17 +37,29 @@ def is_port_in_use(ip, port) -> bool:
     :return:
     """
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.5)
     try:
         s.connect((ip, port))
         s.shutdown(2)
         logger.info(f'Port {port} is in use')
         return True
-    except:
+    except OSError:
         logger.info(f'Port {port} is not in use')
         return False
     finally:
         # 探测用的 socket 必须关闭，否则反复 add 会泄漏文件描述符
         s.close()
+
+
+def _allocate_free_port(ip: str = '127.0.0.1') -> int:
+    """在首选端口段均被占用时，回退由操作系统分配一个可用端口。"""
+    for _ in range(50):
+        port = 40000 + random.randint(0, 200)
+        if not is_port_in_use(ip, port):
+            return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((ip, 0))
+        return int(s.getsockname()[1])
 
 
 
@@ -103,9 +115,7 @@ class ProcessManager(QObject):
         """
         if config not in self.processes:
             # 初始化端口
-            port = 40000 + random.randint(0, 200)
-            while is_port_in_use('127.0.0.1', port):
-                port = 40000 + random.randint(0, 200)
+            port = _allocate_free_port('127.0.0.1')
             self.ports[config] = port
             # 初始化日志队列
             q = self.start_log(config)

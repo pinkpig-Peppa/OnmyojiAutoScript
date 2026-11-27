@@ -46,7 +46,7 @@ class ScriptProcess(Process):
             script.gui_update_task = self.update_tasks
             script.init_server(self.port)
             script.run_server()
-        except:
+        except Exception:
             logger.exception(f'run script {self.config} error')
             raise
 
@@ -82,7 +82,7 @@ class ScriptProcess(Process):
             from module.logger import set_file_logger, set_func_logger
             set_file_logger(name=self.config)
             set_func_logger(self.log_queue.put)
-        except:
+        except Exception:
             logger.exception(f'start log error')
             raise
 

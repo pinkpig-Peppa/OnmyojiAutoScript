@@ -460,7 +460,7 @@ class ScriptTask(ExtendGreenMark, GameUi, SwitchSoul, DokanSceneDetector):
         logger.info(f"start select attack priority: {attack_priority}, remain try: {max_try}")
         try:
             target_attack = self._attack_priorities[attack_priority]
-        except:
+        except (KeyError, IndexError, TypeError):
             target_attack = self._attack_priorities[0]
 
         while 1:

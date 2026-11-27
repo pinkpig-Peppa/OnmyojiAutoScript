@@ -1,6 +1,7 @@
 # This Python file uses the following encoding: utf-8
 # @author runhey
 # github https://github.com/runhey
+import asyncio
 import json
 from fastapi import APIRouter, Body, HTTPException
 from pathlib import Path
@@ -32,14 +33,15 @@ async def home_menu():
 @home_app.post('/notify_test')
 async def notify_test(setting: str, title: str, content: str):
     from module.notify.notify import Notifier
-    try:
+    def _send():
         notifier = Notifier(setting, True)
-        if notifier.push(title=title, content=content):
+        try:
+            return bool(notifier.push(title=title, content=content))
+        finally:
             del notifier
-            return True
-        else:
-            del notifier
-            return False
+
+    try:
+        return await asyncio.to_thread(_send)
     except Exception as e:
         logger.exception(e)
         return str(e)
@@ -47,22 +49,25 @@ async def notify_test(setting: str, title: str, content: str):
 
 @home_app.post('/kill_server')
 async def kill_server():
-    shutdown_ocr_server()
+    await asyncio.to_thread(shutdown_ocr_server)
     MainManager.signal_kill_server = True
     return 'success'
 
 
 @home_app.get('/update_info')
 async def update_info():
-    try:
+    def _fetch():
         updater = Updater()
-        result = {'is_update': updater.check_update(),
-                  'branch': updater.current_branch(),
-                  'current_commit': updater.current_commit(),
-                  'latest_commit': updater.latest_commit(),
-                  'commit': updater.get_commit(n=15),
-                  }
-        return result
+        return {
+            'is_update': updater.check_update(),
+            'branch': updater.current_branch(),
+            'current_commit': updater.current_commit(),
+            'latest_commit': updater.latest_commit(),
+            'commit': updater.get_commit(n=15),
+        }
+
+    try:
+        return await asyncio.to_thread(_fetch)
     except Exception as e:
         logger.error(e)
         return None
@@ -72,8 +77,7 @@ async def update_info():
 async def execute_update():
     # 下拉仓库 -> 关闭所有脚本进程 -> 最后重启oasx
     try:
-        updater = Updater()
-        updater.execute_pull()
+        await asyncio.to_thread(lambda: Updater().execute_pull())
     except Exception as e:
         logger.error(e)
     return '手动更新将会立即结束运行中的脚本服务, 最后你还需重启oasx'
@@ -82,7 +86,7 @@ async def execute_update():
 @home_app.put('/chinese_translate')
 async def chinese_translate(data: dict = Body(...)):
     try:
-        I18n.save_zh_cn(data)
+        await asyncio.to_thread(I18n.save_zh_cn, data)
     except Exception as e:
         logger.error(e)
         raise HTTPException(status_code=400, detail=str(e))
@@ -92,8 +96,7 @@ async def chinese_translate(data: dict = Body(...)):
 @home_app.get('/additional_translate')
 async def additional_translate() -> dict:
     try:
-        data = I18n.load_additions()
-        return data
+        return await asyncio.to_thread(I18n.load_additions)
     except Exception as e:
         logger.error(e)
     return {}
@@ -103,7 +106,7 @@ async def additional_translate() -> dict:
 async def export_diagnostic(config_name: str = ''):
     from module.server.diagnostic import build_diagnostic_zip
     try:
-        zip_path = build_diagnostic_zip(config_name)
+        zip_path = await asyncio.to_thread(build_diagnostic_zip, config_name)
         return {'success': True, 'path': str(zip_path)}
     except Exception as e:
         logger.exception(e)

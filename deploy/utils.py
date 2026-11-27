@@ -149,7 +149,7 @@ class DataProcessInfo:
     def name(self):
         try:
             name = self.proc.name()
-        except:
+        except Exception:
             name = ''
         return name
 
@@ -157,7 +157,7 @@ class DataProcessInfo:
     def cmdline(self):
         try:
             cmdline = self.proc.cmdline()
-        except:
+        except Exception:
             # psutil.AccessDenied
             # # NoSuchProcess: process no longer exists (pid=xxx)
             cmdline = []

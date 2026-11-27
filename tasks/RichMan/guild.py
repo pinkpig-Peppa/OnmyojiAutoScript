@@ -177,7 +177,7 @@ class Guild(Buy, GameUi, RichManAssets):
         try:
             result = re.findall(r'本周剩余数量(\d+)', result)[0]
             result = int(result)
-        except:
+        except (IndexError, ValueError):
             result = 0
         logger.info('Remain: %s' % result)
         return int(result)

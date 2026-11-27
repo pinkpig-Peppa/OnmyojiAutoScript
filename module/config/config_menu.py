@@ -64,5 +64,5 @@ if __name__ == "__main__":
     try:
         m = ConfigMenu()
         print(m.gui_menu)
-    except:
+    except Exception:
         print('weih')

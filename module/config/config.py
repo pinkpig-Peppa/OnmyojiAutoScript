@@ -150,7 +150,7 @@ class Config(ConfigState, ConfigManual, ConfigWatcher, ConfigMenu):
         """
         try:
             return self.data[task][group][argument]
-        except:
+        except (KeyError, TypeError):
             logger.exception(f'have no arg {task}.{group}.{argument}')
 
     def set_arg(self, task: str, group: str, argument: str, value) -> None:
@@ -164,7 +164,7 @@ class Config(ConfigState, ConfigManual, ConfigWatcher, ConfigMenu):
         """
         try:
             self.data[task][group][argument] = value
-        except:
+        except (KeyError, TypeError):
             logger.exception(f'have no arg {task}.{group}.{argument}')
 
     def reload(self):
