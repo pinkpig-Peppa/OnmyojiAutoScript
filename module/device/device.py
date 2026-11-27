@@ -29,6 +29,14 @@ from module.logger import logger
 
 class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
     _screen_size_checked = False
+    _escape_generation = 0
+    _accepted_invitation_generation = 0
+    _task_flow_progress_generation = 0
+    _task_flow_round_generation = 0
+    _task_flow_guard_disabled = False
+    _verified_click = None
+    _confirm_retry_permit = None
+    _click_verification_enabled = True
     detect_record = set()
     click_record = deque(maxlen=15)
     stuck_timer = Timer(60, count=60).start()
@@ -60,6 +68,15 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
                         f'please set a correct serial'
                     )
                     raise RequestHumanTakeover
+
+        self.detect_record = set()
+        self.click_record = deque(maxlen=15)
+        self.stuck_timer = Timer(60, count=60).start()
+        self.stuck_timer_long = Timer(300, count=300).start()
+        self._accepted_invitation_generation = 0
+        self._task_flow_progress_generation = 0
+        self._task_flow_round_generation = 0
+        self.reset_task_recovery()
 
         # 桌面客户端模式：无模拟器生命周期
         if self.is_desktop:
@@ -119,6 +136,10 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
         Returns:
             np.ndarray:
         """
+        flow_guard = getattr(self, '_task_flow_guard', None)
+        if flow_guard is not None:
+            flow_guard.check()
+
         self.stuck_record_check()
 
         # 桌面模式：窗口缺失说明客户端当前不可用（启动期未出窗口，或客户端崩了）。
@@ -136,6 +157,27 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
             super().screenshot()
 
         return self.image
+
+    def reset_task_recovery(self):
+        self._task_flow_guard_disabled = False
+        self._escape_generation = 0
+        self._verified_click = None
+        self._confirm_retry_permit = None
+
+    def confirm_task_round_progress(self):
+        """Renew task residence only after a new round is confirmed in fresh frames."""
+        self._task_flow_round_generation = getattr(self, '_task_flow_round_generation', 0) + 1
+        self.confirm_control_progress(())
+
+    def confirm_control_progress(self, buttons):
+        """Call only after verifying a new page/round, never on a button match."""
+        self._task_flow_progress_generation = getattr(self, '_task_flow_progress_generation', 0) + 1
+        names = {getattr(button, 'name', str(button)) for button in buttons}
+        pending = getattr(self, '_verified_click', None)
+        if pending and pending['name'] in names:
+            self._verified_click = None
+        for button in buttons:
+            self.click_record_remove(getattr(button, 'name', button))
 
     def release_during_wait(self):
         # Scrcpy server is still sending video stream,
@@ -242,6 +284,7 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
         Disable stuck detection and its handler. Usually uses in semi auto and debugging.
         """
         logger.info('Disable stuck detection')
+        self._task_flow_guard_disabled = True
 
         def empty_function(*arg, **kwargs):
             return False
