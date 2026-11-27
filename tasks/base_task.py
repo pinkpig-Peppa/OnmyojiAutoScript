@@ -8,7 +8,7 @@ import random
 from typing import Union
 from datetime import datetime, timedelta
 from pathlib import Path
-from time import sleep, time
+from time import monotonic, sleep, time
 
 from module.atom.animate import RuleAnimate
 from module.atom.click import RuleClick
@@ -20,8 +20,9 @@ from module.atom.ocr import RuleOcr
 from module.atom.swipe import RuleSwipe
 from module.base.timer import Timer
 from module.config.config import Config
+from module.device.confirm_retry import click_confirm_once
 from module.device.device import Device
-from module.exception import ScriptError
+from module.exception import ScriptError, TaskRecoveryFailed
 from module.logger import logger
 from module.ocr.base_ocr import OcrMode
 
@@ -139,6 +140,7 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         # 如果接受邀请则立即执行悬赏任务
         if click_button == self.I_G_ACCEPT:
             self.set_next_run(task='WantedQuests', target=datetime.now().replace(microsecond=0))
+            self.device._accepted_invitation_generation = getattr(self.device, '_accepted_invitation_generation', 0) + 1
         return True
 
     def screenshot(self):
@@ -226,17 +228,21 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         appear = self.appear(target, interval=interval, threshold=threshold)
         if appear and not action:
             x, y = target.coord()
-            self.device.click(x, y, control_name=target.name)
+            if self.device.click(x, y, control_name=target.name) is False:
+                return False
 
         elif appear and action:
             x, y = action.coord()
             if isinstance(action, RuleLongClick):
                 if duration is None:
-                    self.device.long_click(x, y, duration=action.duration / 1000, control_name=target.name)
+                    if self.device.long_click(x, y, duration=action.duration / 1000, control_name=target.name) is False:
+                        return False
                 else:
-                    self.device.long_click(x, y, duration=duration / 1000, control_name=target.name)
+                    if self.device.long_click(x, y, duration=duration / 1000, control_name=target.name) is False:
+                        return False
             elif isinstance(action, RuleClick):
-                self.device.click(x, y, control_name=target.name)
+                if self.device.click(x, y, control_name=target.name) is False:
+                    return False
 
         return appear
 
@@ -803,6 +809,27 @@ class BaseTask(GlobalGameAssets, CostumeBase):
                 elif isinstance(click, RuleOcr) and self.ocr_appear_click(click, interval=interval):
                     continue
 
+    def _ui_verify(self, predicate, controls, timeout=12, fail=True):
+        performance = getattr(self.device, 'performance', None)
+        effective_timeout = performance.timeout(timeout) if performance is not None else timeout
+        deadline = monotonic() + effective_timeout
+        generation = getattr(self.device, '_escape_generation', 0)
+        stable = 0
+        while monotonic() < deadline:
+            self.screenshot()
+            if getattr(self.device, '_escape_generation', 0) != generation:
+                raise TaskRecoveryFailed('UI state verification interrupted by recovery')
+            stable = stable + 1 if predicate() else 0
+            if stable >= 2:
+                confirm = getattr(self.device, 'confirm_control_progress', None)
+                if callable(confirm):
+                    confirm(controls)
+                logger.info('UI next state verified in two fresh frames')
+                return True
+        if fail:
+            raise TaskRecoveryFailed('UI next state not reached after one click')
+        return False
+
     def ui_click_until_disappear(self, click, interval: float = 1):
         """
         点击一个按钮直到消失
@@ -810,12 +837,20 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         :param click:
         :return:
         """
-        while 1:
+        if click is self.I_UI_BACK_RED or click is getattr(self, 'I_SOU_SWITCH_SURE', None):
+            return click_confirm_once(self, lambda: click if self.appear(click) else None, [click])
+        self.screenshot()
+        if not self.appear(click):
+            return False
+        deadline = monotonic() + 12
+        while monotonic() < deadline:
+            if self.appear_then_click(click, interval=interval):
+                self._ui_verify(lambda: not self.appear(click), [click])
+                return True
             self.screenshot()
             if not self.appear(click):
-                break
-            elif self.appear_then_click(click, interval=interval):
-                continue
+                return False
+        raise TaskRecoveryFailed('UI dismiss control was not actionable')
 
     def ui_click_until_smt_disappear(self, click, stop, interval: float = 1):
         """

@@ -39,6 +39,8 @@ from module.logger import logger
 from module.exception import *
 from module.server.i18n import I18n
 from module.ocr.rpc import ensure_ocr_server_ready
+from module.script.task_completion import TaskCompletionGate
+from module.script.task_flow_guard import TaskFlowGuard
 
 
 
@@ -67,6 +69,9 @@ class Script:
         # 跨进程排队管理器（仅在 queue_mode=True 时初始化）
         self.instance_guard: InstanceGuard = None
         self.anti_ban_guard: AntiBanGuard = AntiBanGuard()
+        self.completion_gate = TaskCompletionGate(Path('log/task_retry') / f'{config_name}.json')
+        self._last_failure_scheduled = None
+        self._task_failure_deadlines: dict[str, datetime] = {}
 
     @cached_property
     def config(self) -> "Config":
@@ -330,7 +335,8 @@ class Script:
         :return:
         """
         while True:
-            task = self.config.get_next()
+            gate = getattr(self, 'completion_gate', None)
+            task = gate.select(self.config) if gate is not None else self.config.get_next()
             self.config.task = task
             if self.state_queue:
                 self.state_queue.put({"schedule": self.config.get_schedule_data()})
@@ -547,6 +553,57 @@ class Script:
             self.config.task_call('SoulsTidy')
             time.sleep(1)
 
+    def _defer_failed_task(self, command: str) -> datetime | None:
+        """Apply scheduler.failure_interval once per failed attempt and persist checkpoint wait."""
+        if not command:
+            return None
+        previous = getattr(self, '_last_failure_scheduled', None)
+        if previous is not None and previous[0] == command:
+            return previous[1]
+        gate = getattr(self, 'completion_gate', None)
+        deadlines = getattr(self, '_task_failure_deadlines', None)
+        if deadlines is None:
+            deadlines = self._task_failure_deadlines = {}
+        if command == 'GotoMain':
+            retry_at = datetime.now().replace(microsecond=0) + timedelta(minutes=5)
+            deadlines['GotoMain'] = retry_at
+            self._last_failure_scheduled = (command, retry_at)
+            if gate is not None:
+                gate.release_recovery('GotoMain')
+                gate.defer_recovery('GotoMain', retry_at)
+            logger.warning(f'Home recovery failed; retry at {retry_at}; business retries unchanged')
+            return retry_at
+
+        task_key = convert_to_underscore(command)
+        task_model = getattr(self.config.model, task_key, None)
+        if task_model is None or not hasattr(task_model, 'scheduler'):
+            logger.warning(f'Cannot defer failed task `{command}`: scheduler is missing')
+            return None
+        self.config.task_delay(task=command, success=False, server=False)
+        task_model = getattr(self.config.model, task_key, None)
+        if task_model is None or not hasattr(task_model, 'scheduler'):
+            return None
+        retry_at = task_model.scheduler.next_run
+        deadlines[command] = retry_at
+        self._last_failure_scheduled = (command, retry_at)
+        if gate is not None:
+            if command == 'Restart':
+                gate.defer_recovery('Restart', retry_at)
+                if gate.task:
+                    gate.defer(gate.task, retry_at)
+            elif gate.task == command:
+                gate.defer(command, retry_at)
+        logger.warning(f'Task `{command}` failed; retry at {retry_at} using scheduler.failure_interval')
+        return retry_at
+
+    def _clear_recovery_failure(self, command: str) -> None:
+        if command not in ('Restart', 'GotoMain'):
+            return
+        getattr(self, '_task_failure_deadlines', {}).pop(command, None)
+        gate = getattr(self, 'completion_gate', None)
+        if gate is not None:
+            gate.release_recovery(command)
+
     def run(self, command: str) -> bool:
         """
         :param command:  大写驼峰命名的任务名字
@@ -569,7 +626,11 @@ class Script:
             self.instance_guard.release()
             return False
 
+        self._last_failure_scheduled = None
         try:
+            reset_recovery = getattr(self.device, 'reset_task_recovery', None)
+            if callable(reset_recovery):
+                reset_recovery()
             try:
                 self.device.screenshot()
             except GameNotRunningError:
@@ -582,9 +643,25 @@ class Script:
             module_path = str(Path.cwd() / 'tasks' / command / (module_name+'.py'))
             logger.info(f'module_path: {module_path}, module_name: {module_name}')
             task_module = load_module(module_name, module_path)
-            task_module.ScriptTask(config=self.config, device=self.device).run()
+            task_instance = task_module.ScriptTask(config=self.config, device=self.device)
+            with TaskFlowGuard(task_instance, self.device, command=command):
+                task_instance.run()
         except TaskEnd:
+            self._clear_recovery_failure(command)
+            gate = getattr(self, 'completion_gate', None)
+            if gate is not None and command not in ('Restart', 'GotoMain'):
+                gate.release(command)
             return True
+        except TaskRecoveryFailed as e:
+            logger.warning(f'Task `{command}` recovery/verification failed: {e}')
+            self.save_error_log()
+            self.exception_handler(e=e, command=command)
+            self.config.notifier.push(
+                title=f'{I18n.trans_zh_cn(command)}{command}',
+                content=f"<{self.config_name}> TaskRecoveryFailed: {e}",
+            )
+            self._defer_failed_task(command)
+            return False
         except GameNotRunningError as e:
             logger.warning(e)
             self.exception_handler(e=e, command=command)
@@ -599,6 +676,7 @@ class Script:
             self.config.notifier.push(title=f'{I18n.trans_zh_cn(command)}{command}', content=f"<{self.config_name}> GameStuckError or GameTooManyClickError")
             self.config.task_call('Restart')
             self._force_restart = True
+            self._defer_failed_task(command)
             self.device.sleep(10)
             return False
         except GameBugError as e:
@@ -608,6 +686,7 @@ class Script:
             logger.warning('An error has occurred in Azur Lane game client, Alas is unable to handle')
             logger.warning(f'Restarting {self.device.package} to fix it')
             self.config.task_call('Restart')
+            self._defer_failed_task(command)
             self.device.sleep(10)
             return False
         except GamePageUnknownError as e:
@@ -619,6 +698,7 @@ class Script:
             self.config.notifier.push(title=f'{I18n.trans_zh_cn(command)}{command}', content=f"<{self.config_name}> GamePageUnknownError")
             self.config.task_call('Restart')
             self._force_restart = True
+            self._defer_failed_task(command)
             self.device.sleep(10)
             return False
         except ScriptError as e:
@@ -645,7 +725,13 @@ class Script:
             self.exception_handler(e=e, command=command)
             self.save_error_log()
             self.config.notifier.push(title=f'{I18n.trans_zh_cn(command)}{command}', content=f"<{self.config_name}> Exception occured")
+            self._defer_failed_task(command)
             return False
+        self._clear_recovery_failure(command)
+        gate = getattr(self, 'completion_gate', None)
+        if gate is not None and command not in ('Restart', 'GotoMain'):
+            gate.release(command)
+        return True
 
     def loop(self):
         """
@@ -702,11 +788,15 @@ class Script:
                 logger.info('Last task failed with a game error, run `Restart` before the next task')
                 task = 'Restart'
             # Skip first restart
-            if self.is_first_task and task == 'Restart':
+            gate = getattr(self, 'completion_gate', None)
+            if self.is_first_task and task == 'Restart' and not (gate and gate.task):
                 logger.info('Skip task `Restart` at scheduler start')
                 self.config.task_delay(task='Restart', success=True, server=True)
                 del_cached_property(self, 'config')
                 continue
+
+            if gate is not None and task not in ('Restart', 'GotoMain'):
+                gate.retain(task)
 
             if self._emulator_down:
                 self.device = Device(self.config)

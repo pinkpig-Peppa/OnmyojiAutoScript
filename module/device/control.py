@@ -9,6 +9,7 @@ from module.device.method.minitouch import Minitouch
 from module.device.method.adb import Adb
 from module.device.method.scrcpy import Scrcpy
 from module.device.method.windows import Window
+from module.device.click_verification import before_click, after_click
 from module.logger import logger
 
 
@@ -71,9 +72,11 @@ class Control(Minitouch, Adb, Scrcpy, Window):
         :param control_check:
         :return:
         """
-        if control_check:
-            self.handle_control_check(control_name)
+        if control_check and self.handle_control_check(control_name) is False:
+            return False
         x, y = ensure_int(x, y)
+        verify = control_check and getattr(self, '_click_verification_enabled', True)
+        before = before_click(self, x, y, control_name) if verify else None
         logger.info(
             'Click %s @ %s' % (point2str(x, y), control_name)
         )
@@ -82,6 +85,8 @@ class Control(Minitouch, Adb, Scrcpy, Window):
             self.click_adb
         )
         method(x, y)
+        if before is not None:
+            after_click(self, x, y, control_name, before)
 
 
     def multi_click(self, button, n, interval=(0.1, 0.2)):
