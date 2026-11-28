@@ -87,59 +87,122 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         #     )
         return model_task_name or path_task_name
 
+    def _perf_timeout(self, seconds: float) -> float:
+        performance = getattr(self.device, 'performance', None)
+        return performance.timeout(seconds) if performance is not None else seconds
+
+    def _default_wait_timeout(self) -> float:
+        """Bound implicit waits without shortening a configured long battle or gathering."""
+        from math import isfinite
+        global_battle = getattr(getattr(self.config, 'global_game', None), 'battle', None)
+        context = getattr(self, '_battle_context', None)
+        candidates = (
+            420,
+            getattr(global_battle, 'battle_timeout', None),
+            getattr(getattr(context, 'battle_timer', None), 'limit', None),
+        )
+        limits = []
+        for value in candidates:
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                continue
+            if isfinite(value) and value > 0:
+                limits.append(value)
+        return max(limits)
+
+    def _invitation_identity(self):
+        image = getattr(self.device, 'image', None)
+        if image is None or not hasattr(image, 'shape') or image.shape[:2] != (720, 1280):
+            return None
+        # Exclude the animated avatar, monster illustration and close-button sparkle.
+        return image[240:276, 578:772].copy()
+
+    def _invitation_identity_changed(self, previous) -> bool:
+        import numpy as np
+        current = self._invitation_identity()
+        if current is None or previous is None or current.shape != previous.shape:
+            return False
+        difference = np.max(np.abs(current.astype(np.int16) - previous.astype(np.int16)), axis=2)
+        return float(np.mean(difference > 35)) > 0.12
+
     def _burst(self) -> bool:
         """
-        游戏界面突发异常检测
+        游戏界面突发异常检测（有界单次点击与双新鲜帧确认）
         :return: 没有出现返回False, 其他True
         """
-        image = self.device.image
         appear_invitation = self.appear(self.I_G_ACCEPT)
         if not appear_invitation:
             return False
+        identity = self._invitation_identity()
         logger.info('Invitation appearing')
         invite_type = self.config.global_game.emergency.friend_invitation
-        detect_record = self.device.detect_record
+        detect_record = set(getattr(self.device, 'detect_record', ()))
         match invite_type:
             case FriendInvitation.ACCEPT:
-                logger.info(f"Accept friend invitation")
+                logger.info("Accept friend invitation")
                 click_button = self.I_G_ACCEPT
             case FriendInvitation.REJECT:
-                logger.info(f"Reject friend invitation")
+                logger.info("Reject friend invitation")
                 click_button = self.I_G_REJECT
             case FriendInvitation.ONLY_JADE:
                 # 勾协
-                logger.info(f"Only accept jade invitation")
+                logger.info("Only accept jade invitation")
                 if self.appear(self.I_G_JADE):
                     click_button = self.I_G_ACCEPT
                 else:
                     click_button = self.I_G_IGNORE
             case FriendInvitation.JADE_AND_FOOD:
                 # 如果是接受勾协和粮协
-                logger.info(f"Accept jade and food invitation")
+                logger.info("Accept jade and food invitation")
                 if self.appear(self.I_G_JADE) or self.appear(self.I_G_CAT_FOOD) or self.appear(self.I_G_DOG_FOOD):
                     click_button = self.I_G_ACCEPT
                 else:
                     click_button = self.I_G_IGNORE
             case FriendInvitation.IGNORE:
                 # 如果是忽略
-                logger.info(f"Ignore friend invitation")
+                logger.info("Ignore friend invitation")
                 click_button = self.I_G_IGNORE
             case _:
                 raise ScriptError(f'Unknown friend invitation type: {invite_type}')
         if not click_button:
             raise ScriptError(f'Unknown click button type: {invite_type}')
-        while 1:
-            self.device.screenshot()
-            if not self.appear(target=click_button):
-                logger.info('Deal with invitation done')
-                break
-            if self.appear_then_click(click_button, interval=0.8):
-                continue
-        # 有的时候长战斗 点击后会取消战斗状态
-        self.device.detect_record = detect_record
+
+        deadline = monotonic() + self._perf_timeout(12)
+        generation = getattr(self.device, '_escape_generation', 0)
+        clicked, stable = False, 0
+        try:
+            # Direct capture avoids recursively handling this invitation through screenshot().
+            while monotonic() < deadline:
+                self.device.screenshot()
+                if getattr(self.device, '_escape_generation', 0) != generation:
+                    raise TaskRecoveryFailed('Invitation verification interrupted by recovery')
+                vanished = not self.appear(self.I_G_ACCEPT) and not self.appear(click_button)
+                # A queued invitation can replace this card without hiding Accept.
+                replaced = clicked and identity is not None and self._invitation_identity_changed(identity)
+                vanished = vanished or replaced
+                stable = stable + 1 if vanished else 0
+                if stable >= 2:
+                    if clicked:
+                        confirm = getattr(self.device, 'confirm_control_progress', None)
+                        if callable(confirm):
+                            confirm([click_button])
+                    logger.info('Deal with invitation done')
+                    break
+                if not clicked and not vanished:
+                    if self.appear(click_button):
+                        if not self.appear_then_click(click_button):
+                            raise TaskRecoveryFailed('Invitation input was blocked')
+                        clicked = True
+            else:
+                raise TaskRecoveryFailed('Invitation did not close after one click')
+        finally:
+            # Preserve the caller's battle guard even when invitation verification fails.
+            self.device.detect_record = detect_record
+
         # 如果接受邀请则立即执行悬赏任务
-        if click_button == self.I_G_ACCEPT:
-            self.set_next_run(task='WantedQuests', target=datetime.now().replace(microsecond=0))
+        if clicked and click_button == self.I_G_ACCEPT:
+            self.set_next_run(task='WantedQuests', target=datetime.now().replace(microsecond=0), server=False)
             self.device._accepted_invitation_generation = getattr(self.device, '_accepted_invitation_generation', 0) + 1
         return True
 
@@ -300,46 +363,48 @@ class BaseTask(GlobalGameAssets, CostumeBase):
 
         if appear and not action:
             x, y = target.coord()
-            self.device.click(x, y, control_name=target.name)
+            if self.device.click(x, y, control_name=target.name) is False:
+                return False
         elif appear and action:
             x, y = action.coord()
             if isinstance(action, RuleLongClick):
-                if duration is None:
-                    self.device.long_click(x, y, duration=action.duration / 1000, control_name=target.name)
-                else:
-                    self.device.long_click(x, y, duration=duration / 1000, control_name=target.name)
+                hold = action.duration / 1000 if duration is None else duration / 1000
+                if self.device.long_click(x, y, duration=hold, control_name=target.name) is False:
+                    return False
             elif isinstance(action, RuleClick):
-                self.device.click(x, y, control_name=target.name)
+                if self.device.click(x, y, control_name=target.name) is False:
+                    return False
 
         return appear
 
     def wait_until_appear(self,
                           target: RuleImage | RuleGif | RuleOcr,
                           skip_first_screenshot=False,
-                          wait_time: int = None) -> bool:
+                          wait_time: int | float = None) -> bool:
         """
-        等待直到出现目标
+        等待直到出现目标（未指定 wait_time 时使用默认有界预算，超时抛 TaskRecoveryFailed）
         :param wait_time: 等待时间，单位秒
         :param target:
         :param skip_first_screenshot:
         :return:
         """
-        wait_timer = None
-        if wait_time:
-            wait_timer = Timer(wait_time)
-            wait_timer.start()
+        implicit = wait_time is None
+        budget = self._default_wait_timeout() if implicit else wait_time
+        wait_timer = Timer(self._perf_timeout(budget)).start()
         while 1:
             if skip_first_screenshot:
                 skip_first_screenshot = False
             else:
                 self.screenshot()
-            if wait_timer and wait_timer.reached():
-                logger.warning(f"Wait until appear {target.name} timeout")
-                return False
             if isinstance(target, (RuleImage, RuleGif)) and self.appear(target):
                 return True
             if isinstance(target, RuleOcr) and self.ocr_appear(target):
                 return True
+            if wait_timer.reached():
+                logger.warning(f"Wait until appear {target.name} timeout")
+                if implicit:
+                    raise TaskRecoveryFailed(f'Expected {target.name} did not appear within {budget}s')
+                return False
 
     def wait_until_appear_then_click(self,
                                      target: RuleImage | RuleGif,
@@ -356,29 +421,34 @@ class BaseTask(GlobalGameAssets, CostumeBase):
             return False
         click_x, click_y = target.coord()
         if action is None:
-            self.device.click(click_x, click_y, control_name=target.name)
+            if self.device.click(click_x, click_y, control_name=target.name) is False:
+                return False
         elif isinstance(action, RuleLongClick):
-            self.device.long_click(click_x, click_y, duration=action.duration / 1000, control_name=target.name)
+            if self.device.long_click(click_x, click_y, duration=action.duration / 1000, control_name=target.name) is False:
+                return False
         elif isinstance(action, RuleClick):
-            self.device.click(click_x, click_y, control_name=target.name)
+            if self.device.click(click_x, click_y, control_name=target.name) is False:
+                return False
         return True
 
-    def wait_until_disappear(self, target: RuleImage, wait_time: int = None) -> None:
+    def wait_until_disappear(self, target: RuleImage, wait_time: float = None, timeout: float = None) -> bool:
         """
-        等待目标消失
-        :param wait_time: 超时时间(秒)，None 表示不限制
+        等待目标消失；兼容旧版 wait_time 与新版 timeout 参数。
+        显式超时返回 False；默认使用有界等待，到期保留任务并抛出 TaskRecoveryFailed。
         """
-        wait_timer = None
-        if wait_time:
-            wait_timer = Timer(wait_time)
-            wait_timer.start()
+        effective = timeout if timeout is not None else wait_time
+        implicit = effective is None
+        budget = self._default_wait_timeout() if implicit else effective
+        timeout_timer = Timer(self._perf_timeout(budget)).start()
         while 1:
             self.screenshot()
             if not self.appear(target):
-                break
-            if wait_timer and wait_timer.reached():
+                return True
+            if timeout_timer.reached():
                 logger.warning(f'Wait disappear timeout: {target.name}')
-                break
+                if implicit:
+                    raise TaskRecoveryFailed(f'{target.name} did not disappear within {budget}s')
+                return False
 
     def wait_until_pos_stable(self, target: RuleImage, stable_time: float = 0.3, timeout: float = 2,
                               threshold: float = None, skip_first_screenshot: bool = True) -> bool:
@@ -392,7 +462,7 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         :return: timer时间内稳定出现则返回True, 否则False
         """
         logger.info(f'Wait until {target.name} position stable')
-        timeout_timer = Timer(timeout).start()
+        timeout_timer = Timer(self._perf_timeout(timeout)).start()
         stable_timer = Timer(stable_time).start()
         pre_roi_front, cur_roi_front = None, None
         origin_roi_back = target.roi_back
@@ -436,7 +506,9 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         :return:
         """
         target._match_init = False
-        timeout.reset()
+        # 使用局部 Timer 副本，防止跨次调用共享可变默认参数或叠加缩放倍率
+        local_timer = Timer(timer.limit, count=timer.count)
+        local_timeout = Timer(self._perf_timeout(timeout.limit), count=timeout.count).start()
         while 1:
             if skip_first_screenshot:
                 skip_first_screenshot = False
@@ -445,16 +517,14 @@ class BaseTask(GlobalGameAssets, CostumeBase):
 
             if target._match_init:
                 if target.match(self.device.image):
-                    if timer.reached():
+                    if local_timer.reached():
                         break
                 else:
-                    # button.load_color(self.device.image)
-                    timer.reset()
+                    local_timer.reset()
             else:
-                # target.load_color(self.device.image)
                 target._match_init = True
 
-            if timeout.reached():
+            if local_timeout.reached():
                 logger.warning(f'Wait_until_stable({target}) timeout')
                 break
 
@@ -468,7 +538,9 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         """
         if not isinstance(rule, RuleAnimate):
             rule = RuleAnimate(rule)
-        timeout_timer = Timer(timeout).start() if timeout is not None else None
+        implicit = timeout is None
+        budget = self._default_wait_timeout() if implicit else timeout
+        timeout_timer = Timer(self._perf_timeout(budget)).start()
         while 1:
             self.screenshot()
 
@@ -485,13 +557,15 @@ class BaseTask(GlobalGameAssets, CostumeBase):
             if stable:
                 if interval:
                     self.interval_timer[rule.name].reset()
-                break
+                return True
 
-            if timeout_timer and timeout_timer.reached():
+            if timeout_timer.reached():
                 logger.info(f'Wait_animate_stable({rule}) timeout')
-                break
+                if implicit:
+                    raise TaskRecoveryFailed(f'Animation {rule.name} did not stabilize within {budget}s')
+                return False
 
-    def swipe(self, swipe: RuleSwipe, interval: float = None) -> None:
+    def swipe(self, swipe: RuleSwipe, interval: float = None) -> bool:
         """
 
         :param interval:
@@ -499,7 +573,7 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         :return:
         """
         if not isinstance(swipe, RuleSwipe):
-            return
+            return False
 
         if interval:
             if swipe.name in self.interval_timer:
@@ -511,15 +585,16 @@ class BaseTask(GlobalGameAssets, CostumeBase):
                 self.interval_timer[swipe.name] = Timer(interval)
             # 如果时间还没到达，则不执行
             if not self.interval_timer[swipe.name].reached():
-                return
+                return False
 
         x1, y1, x2, y2 = swipe.coord()
-        self.device.swipe(p1=(x1, y1), p2=(x2, y2), control_name=swipe.name)
+        if self.device.swipe(p1=(x1, y1), p2=(x2, y2), control_name=swipe.name) is False:
+            return False
 
         # 执行后，如果有限制时间，则重置限制时间
         if interval:
-            # logger.info(f'Swipe {swipe.name}')
             self.interval_timer[swipe.name].reset()
+        return True
 
     def click(self, click: Union[RuleClick, RuleLongClick, RuleImage, RuleOcr] = None, interval: float = None) -> bool:
         """
@@ -545,9 +620,11 @@ class BaseTask(GlobalGameAssets, CostumeBase):
 
         x, y = click.coord()
         if isinstance(click, RuleLongClick):
-            self.device.long_click(x=x, y=y, duration=click.duration / 1000, control_name=click.name)
-        elif isinstance(click, RuleClick) or isinstance(click, RuleImage) or isinstance(click, RuleOcr):
-            self.device.click(x=x, y=y, control_name=click.name)
+            if self.device.long_click(x=x, y=y, duration=click.duration / 1000, control_name=click.name) is False:
+                return False
+        elif isinstance(click, (RuleClick, RuleImage, RuleOcr)):
+            if self.device.click(x=x, y=y, control_name=click.name) is False:
+                return False
 
         # 执行后，如果有限制时间，则重置限制时间
         if interval:
@@ -623,10 +700,12 @@ class BaseTask(GlobalGameAssets, CostumeBase):
 
         if action:
             x, y = action.coord()
-            self.click(action, interval)
+            if self.click(action, interval) is False and interval:
+                return False
         else:
             x, y = target.coord()
-            self.device.click(x=x, y=y, control_name=target.name)
+            if self.device.click(x=x, y=y, control_name=target.name) is False:
+                return False
         return True
 
     def list_find(self, target: RuleList, name: str | list[str], max_swipe: int = 10) -> bool | tuple:
@@ -723,95 +802,108 @@ class BaseTask(GlobalGameAssets, CostumeBase):
     #  ---------------------------------------------------------------------------------------------------------------
     def ui_reward_appear_click(self, screenshot=False) -> bool:
         """
-        如果出现 ‘获得奖励’ 就点击
+        如果出现 ‘获得奖励’ 就点击（使用有界单次确认重试，不误触领取源按钮）
         :return:
         """
         if screenshot:
             self.screenshot()
-        return self.appear_then_click(self.I_UI_REWARD, action=self.C_UI_REWARD, interval=0.4, threshold=0.6)
+        if not self.appear(self.I_UI_REWARD, interval=0.4, threshold=0.6):
+            return False
+        return self._dismiss_reward_once()
 
-    def ui_get_reward(self, click_image: RuleImage or RuleOcr or RuleClick, click_interval: float = 1):
+    def _dismiss_reward_once(self) -> bool:
+        # This is the already displayed reward, never the source claim button.
+        return click_confirm_once(
+            self,
+            lambda: self.C_UI_REWARD if self.appear(self.I_UI_REWARD, threshold=0.6) else None,
+            [self.C_UI_REWARD, self.I_UI_REWARD],
+            dismiss_anywhere=True,
+        )
+
+    def ui_get_reward(self, click_image: RuleImage | RuleOcr | RuleClick, click_interval: float = 1):
         """
-        传进来一个点击图片 或是 一个ocr， 会点击这个图片，然后等待‘获得奖励’，
-        最后当获得奖励消失后 退出
+        传进来一个点击图片或 OCR/区域，最多触发一次领取动作并等待‘获得奖励’弹窗出现与关闭验证。
         :param click_interval:
         :param click_image:
         :return:
         """
-        _timer = Timer(10)
-        _timer.start()
+        _timer = Timer(self._perf_timeout(10)).start()
+        source_clicked = False
+        generation = getattr(self.device, '_escape_generation', 0)
         while 1:
             self.screenshot()
+            if getattr(self.device, '_escape_generation', 0) != generation:
+                raise TaskRecoveryFailed('Reward claim interrupted by recovery')
 
-            if self.ui_reward_appear_click():
-                sleep(0.5)
-                while 1:
-                    self.screenshot()
-                    # 等待动画结束
-                    if not self.appear(self.I_UI_REWARD, threshold=0.6):
-                        logger.info('Get reward success')
-                        break
-
-                    # 一直点击
-                    if self.ui_reward_appear_click():
-                        continue
-                break
+            if self.appear(self.I_UI_REWARD, threshold=0.6):
+                if not self._dismiss_reward_once():
+                    raise TaskRecoveryFailed('Reward dismiss input was blocked')
+                self._ui_verify(lambda: not self.appear(self.I_UI_REWARD, threshold=0.6), [self.I_UI_REWARD])
+                logger.info('Get reward success')
+                return True
             if _timer.reached():
                 logger.warning('Get reward timeout')
-                break
+                if source_clicked:
+                    raise TaskRecoveryFailed('Reward was not observed after one claim input')
+                return False
 
-            if isinstance(click_image, RuleImage):
-                if self.appear_then_click(click_image, interval=click_interval):
+            # A delayed reward is observed after one source input, never by re-clicking it.
+            if not source_clicked:
+                if isinstance(click_image, (RuleImage, RuleGif, RuleOcr)) and not self.appear(click_image):
                     continue
-            elif isinstance(click_image, RuleOcr):
-                if self.ocr_appear_click(click_image, interval=click_interval):
-                    continue
-            elif isinstance(click_image, RuleClick):
-                if self.click(click_image, interval=click_interval):
-                    continue
+                if not self._ui_action_once(click_image, interval=None):
+                    raise TaskRecoveryFailed('Reward claim input was blocked')
+                source_clicked = True
 
-        return True
+    def _ui_action_once(self, control, interval=1) -> bool:
+        if isinstance(control, (RuleImage, RuleGif)):
+            return self.appear_then_click(control, interval=interval)
+        if isinstance(control, RuleOcr):
+            return self.ocr_appear_click(control, interval=interval)
+        if interval is None and isinstance(control, RuleClick):
+            x, y = control.coord()
+            return self.device.click(x=x, y=y, control_name=control.name) is not False
+        return self.click(control, interval=interval)
 
     def ui_click(self, click, stop, interval=1, timeout=None):
         """
-        循环的一个操作，直到出现stop
-        :param click:
-        :param stop:
-        :param interval: 点击间隔
-        :param timeout: 超时时间（秒），None表示不超时
-        :return:
+        触发源控件并验证目标状态出现；未传 timeout 时有界失败抛 TaskRecoveryFailed，显式 timeout 返回 bool。
         """
-        timer = Timer(timeout).start() if timeout else None
-        while 1:
+        implicit = timeout is None
+        action_budget = 12 if implicit else timeout
+        verify_budget = 12 if implicit else timeout
+        self.screenshot()
+        if self.appear(stop):
+            return self._ui_verify(lambda: self.appear(stop), [], timeout=verify_budget, fail=implicit)
+        deadline = monotonic() + self._perf_timeout(action_budget)
+        while monotonic() < deadline:
+            if self._ui_action_once(click, interval):
+                remaining = verify_budget if implicit else max(0.1, deadline - monotonic())
+                return self._ui_verify(lambda: self.appear(stop), [click], timeout=remaining, fail=implicit)
             self.screenshot()
             if self.appear(stop):
-                return True
-            if timer and timer.reached():
-                logger.warning(f'ui_click timeout after {timeout}s')
-                return False
-            if isinstance(click, RuleImage) and self.appear_then_click(click, interval=interval):
-                continue
-            if isinstance(click, RuleClick) and self.click(click, interval=interval):
-                continue
-            elif isinstance(click, RuleOcr) and self.ocr_appear_click(click, interval=interval):
-                continue
+                remaining = verify_budget if implicit else max(0.1, deadline - monotonic())
+                return self._ui_verify(lambda: self.appear(stop), [], timeout=remaining, fail=implicit)
+        if implicit:
+            raise TaskRecoveryFailed('UI source control was not actionable')
+        logger.warning(f'ui_click timeout after {timeout}s')
+        return False
 
     def ui_clicks(self, clicks: list[RuleImage | RuleOcr | RuleClick], stop: RuleImage, interval=1):
-        while 1:
+        sent = set()
+        deadline = monotonic() + self._perf_timeout(20)
+        while monotonic() < deadline:
             self.screenshot()
             if self.appear(stop):
-                break
-            for click in clicks:
-                if isinstance(click, RuleImage) and self.appear_then_click(click, interval=interval):
-                    continue
-                elif isinstance(click, RuleClick) and self.click(click, interval=interval):
-                    continue
-                elif isinstance(click, RuleOcr) and self.ocr_appear_click(click, interval=interval):
-                    continue
+                return self._ui_verify(lambda: self.appear(stop), clicks)
+            for index, click in enumerate(clicks):
+                if index not in sent and self._ui_action_once(click, interval):
+                    sent.add(index)
+                    break
+        raise TaskRecoveryFailed('UI sequence did not reach its destination')
 
     def _ui_verify(self, predicate, controls, timeout=12, fail=True):
-        performance = getattr(self.device, 'performance', None)
-        effective_timeout = performance.timeout(timeout) if performance is not None else timeout
+        effective_timeout = self._perf_timeout(timeout)
         deadline = monotonic() + effective_timeout
         generation = getattr(self.device, '_escape_generation', 0)
         stable = 0
@@ -842,7 +934,7 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         self.screenshot()
         if not self.appear(click):
             return False
-        deadline = monotonic() + 12
+        deadline = monotonic() + self._perf_timeout(12)
         while monotonic() < deadline:
             if self.appear_then_click(click, interval=interval):
                 self._ui_verify(lambda: not self.appear(click), [click])
@@ -852,49 +944,61 @@ class BaseTask(GlobalGameAssets, CostumeBase):
                 return False
         raise TaskRecoveryFailed('UI dismiss control was not actionable')
 
+    def ui_click_until_appear_or_timeout(self, click, stop=None, interval: float = 1, timeout: float = 10) -> bool:
+        deadline = monotonic() + self._perf_timeout(timeout)
+        while monotonic() < deadline:
+            self.screenshot()
+            if stop is not None and self.appear(stop):
+                return self._ui_verify(lambda: self.appear(stop), [], timeout=timeout, fail=False)
+            if self._ui_action_once(click, interval):
+                remaining = max(0.1, deadline - monotonic())
+                return self._ui_verify(lambda: stop is not None and self.appear(stop),
+                                       [click], timeout=remaining, fail=False)
+        return False
+
     def ui_click_until_smt_disappear(self, click, stop, interval: float = 1):
         """
-        点击一个按钮/区域/文字直到stop消失
-
+        点击一个按钮/区域/文字直到 stop 消失（有界单次触发 + 双新鲜帧确认）
         """
-        while 1:
+        self.screenshot()
+        if not self.appear(stop):
+            return
+        deadline = monotonic() + self._perf_timeout(12)
+        while monotonic() < deadline:
+            if self._ui_action_once(click, interval):
+                return self._ui_verify(lambda: not self.appear(stop), [click])
             self.screenshot()
             if not self.appear(stop):
-                break
-            if isinstance(click, RuleImage) or isinstance(click, RuleGif):
-                self.appear_then_click(click, interval=interval)
-                continue
-            if isinstance(click, RuleClick):
-                self.click(click, interval)
-                continue
-            if isinstance(click, RuleOcr):
-                self.click(click)
-                continue
+                return
+        raise TaskRecoveryFailed('UI close control was not actionable')
 
     def ui_click_multi_scale(self, click, stop, interval=1, scale_range=None, timeout=None):
         """
-        循环的一个操作，直到出现stop（支持多尺度图片识别）
-        :param click:
-        :param stop:
-        :param interval:
-        :param scale_range: 多尺度缩放范围 (start, end, step)
-        :param timeout: 超时时间（秒），None表示不超时
-        :return: True-找到stop条件, False-超时
+        触发操作直到出现 stop（支持多尺度图片识别，默认具备有界预算）
         """
-        timer = Timer(timeout).start() if timeout else None
-        while 1:
+        implicit = timeout is None
+        budget = 12 if implicit else timeout
+        self.screenshot()
+        if self.appear(stop):
+            return self._ui_verify(lambda: self.appear(stop), [], timeout=budget, fail=implicit)
+        deadline = monotonic() + self._perf_timeout(budget)
+        while monotonic() < deadline:
+            acted = False
+            if isinstance(click, RuleImage):
+                acted = bool(self.appear_then_click_multi_scale(click, scale_range=scale_range, interval=interval))
+            elif isinstance(click, (RuleClick, RuleOcr)):
+                acted = bool(self._ui_action_once(click, interval=interval))
+            if acted:
+                remaining = 12 if implicit else max(0.1, deadline - monotonic())
+                return self._ui_verify(lambda: self.appear(stop), [click], timeout=remaining, fail=implicit)
             self.screenshot()
             if self.appear(stop):
-                return True
-            if timer and timer.reached():
-                logger.warning(f'ui_click_multi_scale timeout after {timeout}s')
-                return False
-            if isinstance(click, RuleImage) and self.appear_then_click_multi_scale(click, scale_range=scale_range, interval=interval):
-                continue
-            if isinstance(click, RuleClick) and self.click(click, interval=interval):
-                continue
-            elif isinstance(click, RuleOcr) and self.ocr_appear_click(click, interval=interval):
-                continue
+                remaining = 12 if implicit else max(0.1, deadline - monotonic())
+                return self._ui_verify(lambda: self.appear(stop), [], timeout=remaining, fail=implicit)
+        if implicit:
+            raise TaskRecoveryFailed('Multi-scale UI source control was not actionable')
+        logger.warning(f'ui_click_multi_scale timeout after {timeout}s')
+        return False
 
     def push_notify(self, content='', title=None, level=3):
         logger.info(f'Push notify: {content}')
