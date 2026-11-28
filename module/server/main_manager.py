@@ -12,7 +12,7 @@ from threading import Thread
 from module.logger import logger
 from module.config.config import Config
 from module.server.script_process import ScriptProcess, ScriptState
-from module.server.config_manager import ConfigManager
+from module.server.config_manager import ConfigManager, safe_config_path
 
 
 class MainManager(ConfigManager):
@@ -44,6 +44,7 @@ class MainManager(ConfigManager):
 
     @staticmethod
     def config_cache(name: str) -> Config:
+        safe_config_path(name)
         return Config(name)
 
     def add_script_file(self, file_name: str):

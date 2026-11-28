@@ -101,8 +101,12 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RyouToppaAssets):
         ryou_toppa_success_penetration = False
         ryou_toppa_admin_flag = False
         # 点击突破
+        enter_timer = Timer(self._perf_timeout(30)).start()
         while 1:
             self.screenshot()
+            if enter_timer.reached():
+                from module.exception import TaskRecoveryFailed
+                raise TaskRecoveryFailed('RyouToppa enter toppa tab timeout')
             if self.appear_then_click(RealmRaidAssets.I_REALM_RAID, interval=1):
                 continue
             if self.appear(self.I_REAL_RAID_REFRESH, threshold=0.8):
@@ -207,23 +211,33 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RyouToppaAssets):
         开启寮突破
         :return:
         """
+        from module.exception import TaskRecoveryFailed
         # 点击寮突
+        select_timer = Timer(self._perf_timeout(20)).start()
         while 1:
             self.screenshot()
+            if select_timer.reached():
+                raise TaskRecoveryFailed('RyouToppa select ryou button timeout')
             if self.appear_then_click(self.I_SELECT_RYOU_BUTTON, interval=1):
                 break
         logger.info(f'Click {self.I_SELECT_RYOU_BUTTON.name}')
 
         # 选择第一个寮
+        first_timer = Timer(self._perf_timeout(20)).start()
         while 1:
             self.screenshot()
+            if first_timer.reached():
+                raise TaskRecoveryFailed('RyouToppa select first guild timeout')
             if self.appear_then_click(self.I_GUILD_ORDERS_REWARDS, action=self.C_SELECT_FIRST_RYOU, interval=1):
                 break
         logger.info(f'Click {self.C_SELECT_FIRST_RYOU.name}')
 
         # 点击开始突入
+        start_timer = Timer(self._perf_timeout(25)).start()
         while 1:
             self.screenshot()
+            if start_timer.reached():
+                raise TaskRecoveryFailed('RyouToppa start toppa confirmation timeout')
             if self.appear_then_click(self.I_START_TOPPA_BUTTON, interval=1):
                 continue
             # 出现寮奖励， 说明寮突已开

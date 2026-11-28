@@ -1,3 +1,5 @@
+import time
+
 # from module.base.button import Button
 from module.base.decorator import cached_property
 from module.base.timer import Timer
@@ -10,10 +12,39 @@ from module.device.method.adb import Adb
 from module.device.method.scrcpy import Scrcpy
 from module.device.method.windows import Window
 from module.device.click_verification import before_click, after_click
+from module.device.human_click import Session, plan_move, sample_dwell, sampled_width, task_generation
 from module.logger import logger
 
 
 class Control(Minitouch, Adb, Scrcpy, Window):
+    _human_click_session = None
+    _human_click_last_point = None
+    _human_click_generation = None
+
+    @property
+    def human_click_session(self):
+        generation = task_generation()
+        if self._human_click_session is None or self._human_click_generation != generation:
+            self._human_click_session = Session()
+            self._human_click_generation = generation
+            self._human_click_last_point = None
+        return self._human_click_session
+
+    def _is_human_click_enabled(self) -> bool:
+        cfg = getattr(self, 'config', None)
+        script_cfg = getattr(cfg, 'script', None) if cfg is not None else None
+        device_cfg = getattr(script_cfg, 'device', None) if script_cfg is not None else None
+        return bool(getattr(device_cfg, 'human_click_enabled', True))
+
+    @staticmethod
+    def _format_action_duration(duration_seconds: float) -> str:
+        return f'[{duration_seconds:.2f}s] '
+
+    def _invalidate_image_batch_cache(self) -> None:
+        invalidate = getattr(self, 'invalidate_image_batch_cache', None)
+        if callable(invalidate):
+            invalidate()
+
     def handle_control_check(self, button):
         # Will be overridden in Device
         pass
@@ -94,16 +125,47 @@ class Control(Minitouch, Adb, Scrcpy, Window):
         x, y = ensure_int(x, y)
         verify = control_check and getattr(self, '_click_verification_enabled', True)
         before = before_click(self, x, y, control_name) if verify else None
-        logger.info(
-            'Click %s @ %s' % (point2str(x, y), control_name)
-        )
-        method = self.click_methods.get(
-            self.config.script.device.control_method,
-            self.click_adb
-        )
-        method(x, y)
+        self._invalidate_image_batch_cache()
+        if not self._is_human_click_enabled():
+            logger.info('Click %s @ %s' % (point2str(x, y), control_name))
+            method = self.click_methods.get(
+                self.config.script.device.control_method,
+                self.click_adb,
+            )
+            method(x, y)
+            if before is not None:
+                after_click(self, x, y, control_name, before)
+            return
+        session = self.human_click_session
+        session.before_click()
+        width = sampled_width((x, y))
+        start = time.perf_counter()
+        control_method = self.config.script.device.control_method
+        if control_method == 'window_message':
+            start_point = self._human_click_last_point or (x, y)
+            path = plan_move(start_point, (x, y), width=width, rng=session.rng)
+            self.hover_window_message(path)
+        dwell = sample_dwell(rng=session.rng)
+        if control_method == 'window_message':
+            self.click_window_message(x, y, duration=dwell)
+        else:
+            method = self.long_click_methods.get(control_method, self.long_click_adb)
+            method(x, y, dwell)
+        elapsed = time.perf_counter() - start
+        self._human_click_last_point = (x, y)
+        logger.info(f'{self._format_action_duration(elapsed)}Click {point2str(x, y)} @ {control_name}')
         if before is not None:
             after_click(self, x, y, control_name, before)
+        rest = session.after_click()
+        if rest is not None and getattr(self, '_time_critical_clicks', False):
+            logger.debug(f'Skip click-session rest during timed round: {rest:.2f}s')
+            rest = None
+        if rest is not None:
+            logger.info(f'Human click session rest: {rest:.2f}s')
+            self.sleep(rest)
+            clear_stuck = getattr(self, 'stuck_record_clear', None)
+            if callable(clear_stuck):
+                clear_stuck()
 
 
     def multi_click(self, button, n, interval=(0.1, 0.2)):

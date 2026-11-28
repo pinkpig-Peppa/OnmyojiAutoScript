@@ -66,11 +66,13 @@ app.add_middleware(
 
 @app.middleware("http")
 async def webui_key_middleware(request: Request, call_next):
-    """配置了 --key 时强制校验口令，避免本机服务被任意页面/脚本调用"""
+    """配置了 --key 时强制校验口令；未配置口令时拒绝非本机回环来源"""
     # CORS preflight OPTIONS requests carry no custom headers; let them pass to CORS middleware.
     if request.method == "OPTIONS":
         return await call_next(request)
-    if not State.check_webui_key(request.headers.get("x-oas-key") or request.query_params.get("key")):
+    client_host = request.client.host if request.client else None
+    provided = request.headers.get("x-oas-key") or request.query_params.get("key")
+    if not State.check_webui_key(provided, client_host=client_host):
         return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED,
                             content={'message': 'unauthorized'})
     return await call_next(request)

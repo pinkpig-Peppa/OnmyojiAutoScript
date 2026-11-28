@@ -1,6 +1,7 @@
 """
 Copy from https://github.com/LmeSzinc/AzurLaneAutoScript
 """
+import hmac
 import multiprocessing
 import threading
 from multiprocessing.managers import SyncManager
@@ -65,13 +66,17 @@ class State:
     # webui 允许的跨域来源，逗号分隔；为空表示保持旧行为（允许全部来源）
     webui_cors_origins: str = ""
 
+    LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+
     @classmethod
-    def check_webui_key(cls, provided) -> bool:
-        """校验 webui 口令，未配置口令时始终通过"""
+    def check_webui_key(cls, provided, client_host: str | None = None) -> bool:
+        """校验 webui 口令；未配置口令时仅放行本机回环地址，拒绝未鉴权的远程来源"""
         key = cls.webui_key or ""
-        if not key:
+        if key:
+            return isinstance(provided, str) and hmac.compare_digest(provided, key)
+        if client_host is None or client_host in cls.LOOPBACK_HOSTS:
             return True
-        return provided == key
+        return False
 
     @classmethod
     def init(cls):

@@ -38,7 +38,8 @@ from module.base.decorator import del_cached_property
 from module.logger import logger
 from module.exception import *
 from module.server.i18n import I18n
-from module.ocr.rpc import ensure_ocr_server_ready
+from module.image.rpc import set_image_low_spec_mode
+from module.ocr.rpc import ensure_ocr_server_ready, set_ocr_low_spec_mode, set_ocr_model_size
 from module.script.task_completion import TaskCompletionGate
 from module.script.task_flow_guard import TaskFlowGuard
 
@@ -72,12 +73,28 @@ class Script:
         self.completion_gate = TaskCompletionGate(Path('log/task_retry') / f'{config_name}.json')
         self._last_failure_scheduled = None
         self._task_failure_deadlines: dict[str, datetime] = {}
+        self.low_spec_mode: bool = False
+
+    def _apply_low_spec_settings(self, config: "Config") -> None:
+        low_spec = bool(getattr(config.script.device, 'low_spec_mode', False))
+        self.low_spec_mode = low_spec
+        set_image_low_spec_mode(low_spec)
+        set_ocr_low_spec_mode(low_spec)
+        set_ocr_model_size('medium')
+        if low_spec:
+            logger.info(
+                'Low spec mode enabled: frame cache=10s, '
+                'OCR model=medium, OCR timeout=30s, OCR cache=2s, '
+                'image threshold unchanged; idle timeout=180s, login budget=900s, '
+                'screenshot interval>=0.8s, combat>=1.5s, control interval>=1.2s'
+            )
 
     @cached_property
     def config(self) -> "Config":
         try:
             from module.config.config import Config
             config = Config(config_name=self.config_name)
+            self._apply_low_spec_settings(config)
             return config
         except RequestHumanTakeover:
             logger.critical('Request human takeover')
@@ -697,6 +714,15 @@ class Script:
         if gate is not None:
             gate.release_recovery(command)
 
+    def _finish_error_learning(self, success: bool, error: Exception | None = None) -> None:
+        device = self.__dict__.get('device')
+        learning = getattr(device, '_error_learning', None) if device is not None else None
+        if learning is not None:
+            try:
+                learning.finish(success, error=error)
+            except Exception as exc:
+                logger.warning(f'Unable to save error experience; task outcome unchanged: {exc}')
+
     def run(self, command: str) -> bool:
         """
         :param command:  大写驼峰命名的任务名字
@@ -720,12 +746,21 @@ class Script:
             return False
 
         self._last_failure_scheduled = None
+        from module.atom.click import RuleClick
+        RuleClick.reset_task_points()
         try:
             reset_recovery = getattr(self.device, 'reset_task_recovery', None)
             if callable(reset_recovery):
                 reset_recovery()
             self.device._failed_original_page = None
             self.device._failed_original_page_captured = False
+            self.config._learning_task_outcomes = {}
+            self.device._error_learning = None
+            try:
+                from module.device.error_learning import create_session
+                self.device._error_learning = create_session(self.config, command, logger.warning, self.device)
+            except Exception as exc:
+                logger.warning(f'Error learning unavailable; original behavior retained: {exc}')
             try:
                 self.device.screenshot()
             except GameNotRunningError:
@@ -755,8 +790,12 @@ class Script:
             gate = getattr(self, 'completion_gate', None)
             if gate is not None and command not in ('Restart', 'GotoMain'):
                 gate.release(command)
+            declared = getattr(self.config, '_learning_task_outcomes', {}).get(convert_to_underscore(command))
+            verified = declared is True or command == 'GotoMain'
+            self._finish_error_learning(bool(verified and declared is not False))
             return True
         except TaskRecoveryFailed as e:
+            self._finish_error_learning(False, error=e)
             logger.warning(f'Task `{command}` recovery/verification failed: {e}')
             self.save_error_log()
             self.exception_handler(e=e, command=command)
@@ -767,11 +806,13 @@ class Script:
             self._defer_failed_task(command)
             return False
         except GameNotRunningError as e:
+            self._finish_error_learning(False, error=e)
             logger.warning(e)
             self.exception_handler(e=e, command=command)
             self.config.task_call('Restart')
             return True
         except (GameStuckError, GameTooManyClickError) as e:
+            self._finish_error_learning(False, error=e)
             logger.error(e)
             self.save_error_log()
             self.exception_handler(e=e, command=command)
@@ -784,6 +825,7 @@ class Script:
             self.device.sleep(10)
             return False
         except GameBugError as e:
+            self._finish_error_learning(False, error=e)
             logger.warning(e)
             self.save_error_log()
             self.exception_handler(e=e, command=command)
@@ -794,6 +836,7 @@ class Script:
             self.device.sleep(10)
             return False
         except GamePageUnknownError as e:
+            self._finish_error_learning(False, error=e)
             logger.info('Game server may be under maintenance or network may be broken, check server status now')
             # 这个还不重要 留着坑填
             logger.critical('Game page unknown')
@@ -806,6 +849,7 @@ class Script:
             self.device.sleep(10)
             return False
         except ScriptError as e:
+            self._finish_error_learning(False, error=e)
             logger.critical(e)
             self.exception_handler(e=e, command=command)
             logger.critical('This is likely to be a mistake of developers, but sometimes just random issues')
@@ -815,6 +859,7 @@ class Script:
                 state_queue.put({"state": 2})
             return False
         except RequestHumanTakeover as e:
+            self._finish_error_learning(False, error=e)
             logger.critical(e)
             self.exception_handler(e=e, command=command)
             logger.critical('Request human takeover')
@@ -825,6 +870,7 @@ class Script:
                 state_queue.put({"state": 2})
             return False
         except Exception as e:
+            self._finish_error_learning(False, error=e)
             logger.exception(e)
             self.exception_handler(e=e, command=command)
             self.save_error_log()
@@ -838,6 +884,9 @@ class Script:
         gate = getattr(self, 'completion_gate', None)
         if gate is not None and command not in ('Restart', 'GotoMain'):
             gate.release(command)
+        declared = getattr(self.config, '_learning_task_outcomes', {}).get(convert_to_underscore(command))
+        verified = declared is True or command == 'GotoMain'
+        self._finish_error_learning(bool(verified and declared is not False))
         return True
 
     def loop(self):

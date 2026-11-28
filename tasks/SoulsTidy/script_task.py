@@ -5,7 +5,7 @@ from time import sleep
 from datetime import timedelta, datetime, time
 from cached_property import cached_property
 
-from module.exception import TaskEnd
+from module.exception import TaskEnd, TaskRecoveryFailed
 from module.logger import logger
 from module.base.timer import Timer
 
@@ -32,10 +32,13 @@ class ScriptTask(GameUi, SoulsTidyAssets):
         进入到御魂的主界面
         :return:
         """
+        enter_timer = Timer(self._perf_timeout(30)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_ST_GREED) and self.appear(self.I_ST_TIDY):
                 break
+            if enter_timer.reached():
+                raise TaskRecoveryFailed('SoulsTidy goto_souls timeout')
 
             if self.appear_then_click(self.I_ST_REPLACE, interval=1):
                 continue
@@ -82,11 +85,14 @@ class ScriptTask(GameUi, SoulsTidyAssets):
                     continue
             logger.info('Feed greed ghost done')
         # 关闭贪吃鬼, 进入奉纳
+        bongna_timer = Timer(self._perf_timeout(30)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_ST_CAT):
                 # 出现招财猫
                 break
+            if bongna_timer.reached():
+                raise TaskRecoveryFailed('SoulsTidy enter bongna timeout')
 
             # https://github.com/runhey/OnmyojiAutoScript/issues/662
             if self.appear(self.I_ST_UNSELECTED):
@@ -104,16 +110,22 @@ class ScriptTask(GameUi, SoulsTidyAssets):
             """
             logger.hr('Enter bongna')
             # 确保已弃置界面
+            abandoned_timer = Timer(self._perf_timeout(20)).start()
             while 1:
                 self.screenshot()
                 if self.appear(self.I_ST_ABANDONED_SELECTED):
                     break
+                if abandoned_timer.reached():
+                    raise TaskRecoveryFailed('SoulsTidy select abandoned tab timeout')
                 self.click(self.I_ST_ABANDONED_SELECTED, interval=1.5)
             # 确保是按照等级来排序的
+            sort_timer = Timer(self._perf_timeout(25)).start()
             while 1:
                 self.screenshot()
                 if self.ocr_appear(self.O_ST_SORT_LEVEL_1):
                     break
+                if sort_timer.reached():
+                    raise TaskRecoveryFailed('SoulsTidy sort by level timeout')
                 if self.ocr_appear_click(self.O_ST_SORT_LEVEL_2, interval=0.6):
                     continue
                 if self.ocr_appear_click(self.O_ST_SORT_TIME, interval=2):
@@ -124,7 +136,9 @@ class ScriptTask(GameUi, SoulsTidyAssets):
                     continue
             logger.info('Sort by level')
             # 开始奉纳
-            while 1:
+            donate_rounds = 0
+            while donate_rounds < 100:
+                donate_rounds += 1
                 if (self.wait_until_appear(self.I_ST_SOUL_STACK, wait_time=2) or
                         self.wait_until_appear(self.I_ST_SOUL_STACK_1, wait_time=2)):
                     # 方式1. 御魂堆叠奉纳
@@ -163,8 +177,11 @@ class ScriptTask(GameUi, SoulsTidyAssets):
                     logger.warning('Donate button not appear, skip')
                     continue
                 # 点击奉纳 及收取奖励
+                claim_timer = Timer(self._perf_timeout(30)).start()
                 while 1:
                     self.screenshot()
+                    if claim_timer.reached():
+                        raise TaskRecoveryFailed('SoulsTidy donate reward claim timeout')
                     if self.appear_then_click(self.I_UI_CONFIRM, interval=0.5):
                         continue
                     # 如果奉纳少就不是神赐而是获得奖励

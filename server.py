@@ -74,9 +74,16 @@ def fun(ev: threading.Event):
 
     host = args.host or State.deploy_config.WebuiHost or "127.0.0.1"
     port = args.port or int(State.deploy_config.WebuiPort) or 22270
-    State.webui_key = (args.key or '').strip()
-    if State.webui_key and host not in ("127.0.0.1", "localhost", "::1"):
-        logger.warning("webui 已启用口令校验，请确认对外暴露的来源可信")
+    configured_password = getattr(State.deploy_config, 'Password', None) or ''
+    State.webui_key = (args.key or str(configured_password)).strip()
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        if State.webui_key:
+            logger.warning("webui 已启用口令校验，请确认对外暴露的来源可信")
+        else:
+            logger.warning(
+                "WebUI 正在监听非回环地址但未配置口令 (--key / Password)；"
+                "非本机回环来源的请求将被自动拒绝 (401 Unauthorized)"
+            )
 
     logger.hr("Launcher config")
     logger.attr("Host", host)

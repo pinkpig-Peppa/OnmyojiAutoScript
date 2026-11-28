@@ -78,6 +78,26 @@ class Device(BaseModel):
     # 启动时纯后台运行模拟器，不显示窗口和任务栏
     run_background_only: bool = Field(default=False,
                                              description='模拟器无UI后台运行，关掉后重启脚本会重新显示（无需重启OAS）')
+    # 低端机适配：延长登录/响应等待、降低截图及点击频率；重启脚本生效
+    low_spec_mode: bool = Field(
+        default=False,
+        title='低端机模式',
+        description='默认关闭。开启后普通卡死等待延长为180秒，登录最多等待900秒，'
+                    '通用界面等待延长为3倍；截图至少间隔0.8秒（战斗1.5秒），'
+                    '操作至少间隔1.2秒。保留原OCR模型和识别阈值。重启脚本生效。',
+    )
+    human_click_enabled: bool = Field(
+        default=True,
+        title='拟人点击采样与节奏',
+        description='启用截断高斯区域采样、后台悬停最小急动度轨迹（window_message）与会话级节奏停顿。',
+    )
+    error_learning_enabled: bool = Field(
+        default=True,
+        title='本地错误经验学习',
+        description='记录界面异常及恢复结果。相同任务、设备和相似画面至少两次恢复后任务明确成功，'
+                    '才优先复用等待时间和页面识别顺序；失败后停用该经验。仅本机保存，不改变点击上限、'
+                    '战斗等待300秒及最多3次ESC限制。下次任务生效。',
+    )
 
 
 

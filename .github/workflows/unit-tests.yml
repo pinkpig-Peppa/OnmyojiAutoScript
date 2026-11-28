@@ -40,25 +40,12 @@ jobs:
 
       - name: Compile check all Python sources
         run: |
-          python -B -c "import compileall, sys; ok = all(compileall.compile_dir(d, quiet=1) for d in ('module', 'tasks', 'dev_tools')) and compileall.compile_file('script.py', quiet=1) and compileall.compile_file('server.py', quiet=1); sys.exit(0 if ok else 1)"
+          python -B -c "import compileall, sys; ok = all(compileall.compile_dir(d, quiet=1) for d in ('module', 'tasks', 'dev_tools', 'deploy')) and compileall.compile_file('script.py', quiet=1) and compileall.compile_file('server.py', quiet=1); sys.exit(0 if ok else 1)"
 
       - name: Static task loop & BaseTask bound check
         run: |
           python -B dev_tools/audit_task_loops.py . --check
 
-      - name: Run offline unit and guard regression suite
+      - name: Run full offline unit and guard regression suite
         run: |
-          python -B -m pytest `
-            tests/test_ocr_filter.py `
-            tests/test_hero_test_skill_fallback.py `
-            tests/test_mall_appearance.py `
-            tests/test_six_realms_island_entry.py `
-            tests/test_switch_onmyoji.py `
-            tests/test_reliability_guards.py `
-            tests/test_shared_bounds_and_loop_audit.py `
-            tests/module/atom/test_click.py `
-            tests/tasks/Component/Costume/test_costume_switch.py `
-            tests/tasks/Component/CostumeTheme/test_theme.py `
-            tests/tasks/Component/GeneralBattle/test_randomclick_gate.py `
-            tests/tasks/GameUi/test_shared_guild_mask.py `
-            tests/tasks/KekkaiUtilize/test_realm_multiscale.py
+          python -B -m pytest tests

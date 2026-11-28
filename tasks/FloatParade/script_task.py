@@ -12,7 +12,7 @@ from tasks.FloatParade.config import FloatParadeConfig, LevelReward
 from tasks.Component.RightActivity.right_activity import RightActivity
 
 from module.logger import logger
-from module.exception import TaskEnd
+from module.exception import TaskEnd, TaskRecoveryFailed
 from module.base.timer import Timer
 
 class ScriptTask(RightActivity, FloatParadeAssets, TalismanPassAssets):
@@ -21,10 +21,13 @@ class ScriptTask(RightActivity, FloatParadeAssets, TalismanPassAssets):
         con: FloatParadeConfig = self.config.float_parade.float_parade
         self.enter(self.I_FP_ACCESS)
         logger.info('Enter float parade')
+        enter_timer = Timer(self._perf_timeout(30)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_FP_UPGRADE):
                 break
+            if enter_timer.reached():
+                raise TaskRecoveryFailed('FloatParade enter upgrade page timeout')
             if self.appear_then_click(self.I_FP_ACCESS, interval=0.8):
                 continue
             if self.appear_then_click(self.I_FP_RED_CLOSE, interval=1.5):

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import atexit
 import multiprocessing
-import pickle
 import socket
 import time
 import inspect
@@ -13,6 +12,7 @@ from typing import Any, Optional
 import numpy as np
 import zerorpc
 
+from module.base.array_codec import encode_ndarray
 from module.exception import ScriptError
 from module.image.runtime import ImageRuntime
 from module.logger import logger
@@ -143,11 +143,16 @@ def ensure_image_server_started() -> bool:
     if not deploy_config.StartImageServer:
         return False
 
-    if deploy_config.ImageServerPort:
-        port = int(deploy_config.ImageServerPort)
-    else:
-        _, port = _split_host_port(str(deploy_config.ImageClientAddress))
-    host = "0.0.0.0"
+    client_host, client_port = _split_host_port(
+        str(deploy_config.ImageClientAddress or "127.0.0.1:22269")
+    )
+    port = int(deploy_config.ImageServerPort) if deploy_config.ImageServerPort else client_port
+    configured_host = getattr(deploy_config, "ImageServerHost", None)
+    host = (
+        str(configured_host).strip()
+        if configured_host
+        else ("127.0.0.1" if client_host in ("127.0.0.1", "localhost", "::1", "") else "0.0.0.0")
+    )
 
     if _is_port_in_use("127.0.0.1", port):
         logger.info(f"Image server already running on port {port}")
@@ -287,7 +292,7 @@ class ImageClient:
             image: 当前截图的 numpy 数组。客户端会在本地序列化后上传一次。
             config_name: 当前脚本配置名；服务端用它删除同配置旧截图帧。
         """
-        payload = pickle.dumps(image, protocol=4)
+        payload = encode_ndarray(image)
         return self.client.register_frame(
             payload,
             config_name,
@@ -323,7 +328,7 @@ class ImageClient:
         """
         if frame_id is not None or image is None:
             return None
-        return pickle.dumps(image, protocol=4)
+        return encode_ndarray(image)
 
     @_retry_expired_frame
     def match_rule(
@@ -486,7 +491,7 @@ class ImageClient:
             threshold: 动态模板匹配阈值。
             name: 用于日志输出的匹配名称。
         """
-        template_payload = pickle.dumps(template, protocol=4)
+        template_payload = encode_ndarray(template)
         image_payload = self._encode_image_payload(image=image, frame_id=frame_id)
         return self.client.match_dynamic_template(
             template_payload,

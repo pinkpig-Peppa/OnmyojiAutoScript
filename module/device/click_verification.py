@@ -3,6 +3,7 @@ import time
 import cv2
 import numpy as np
 
+from module.device.repeat_policy import chess_repeat_unrestricted
 from module.exception import TaskRecoveryFailed
 from module.logger import logger
 
@@ -32,6 +33,8 @@ def before_click(device, x, y, name):
     if image is None:
         device.screenshot()
     current = signature(device.image, x, y)
+    if chess_repeat_unrestricted(device):
+        return current
     previous = getattr(device, '_verified_click', None)
     permit = getattr(device, '_confirm_retry_permit', None)
     if permit is not None:

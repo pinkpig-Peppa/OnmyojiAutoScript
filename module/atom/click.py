@@ -1,16 +1,46 @@
 # This Python file uses the following encoding: utf-8
 # @author runhey
 # github https://github.com/runhey
+from contextvars import ContextVar
+from math import ceil
 import random
+from time import monotonic
 import numpy as np
 
 from module.base.decorator import cached_property
 from module.base.utils.utils import random_normal_distribution_int
+from module.device.human_click import TargetBox, reset_task, sample_point
 from module.logger import logger
 
-class RuleClick:
 
-    def __init__(self, roi_front: tuple, roi_back: tuple, name: str = None) -> None:
+class RuleClick:
+    _task_click_state = ContextVar('ruleclick_task_click_state', default=None)
+    _recent_limit = 6
+    _history_limit = 256
+    _DENSITY_PROFILES = {
+        None: (0.98, 0.02),
+        'High': (1.0, 0.0),
+        'More': (0.95, 0.05),
+    }
+
+    @classmethod
+    def reset_task_points(cls):
+        """每次任务启动清空各规则的近期落点和全局上一落点。"""
+        RuleClick._task_click_state.set({
+            'rules': {},
+            'previous_point': None,
+            'history': [],
+        })
+        reset_task()
+
+    def __init__(
+        self,
+        roi_front: tuple,
+        roi_back: tuple,
+        name: str = None,
+        functional: bool = True,
+        profile: str = None,
+    ) -> None:
         """
         初始化
         :param roi_front:
@@ -22,26 +52,72 @@ class RuleClick:
             self.name = name
         else:
             self.name = 'click'
+        self.functional = functional
+        if profile in ('', 'Default'):
+            profile = None
+        if isinstance(profile, str):
+            profile = {'high': 'High', 'more': 'More'}.get(profile.lower(), profile)
+        if profile not in self._DENSITY_PROFILES:
+            raise ValueError('RuleClick profile must be High, More, or omitted')
+        self.profile = profile
+
+    @classmethod
+    def task_click_history(cls) -> tuple:
+        state = cls._task_click_state.get()
+        if state is None:
+            cls.reset_task_points()
+            state = cls._task_click_state.get()
+        return tuple(state['history'])
+
+    def _record_task_click(self, point: tuple[int, int]) -> None:
+        task_state = RuleClick._task_click_state.get()
+        if task_state is None:
+            self.reset_task_points()
+            task_state = RuleClick._task_click_state.get()
+        task_state['previous_point'] = point
+        history = task_state['history']
+        history.append((point[0], point[1], monotonic(), self.functional))
+        del history[:-self._history_limit]
 
     def coord(self) -> tuple:
         """
-        获取坐标, 从roi_front随机获取坐标
+        获取坐标，在 roi_front 内按截断高斯采样。
         :return:
         """
-        x, y, w, h = self.roi_front
-        x = random_normal_distribution_int(x, x + w)
-        y = random_normal_distribution_int(y, y + h)
-        return x, y
+        return self._circle_normal_coord(self.roi_front)
 
     def coord_more(self) -> tuple:
         """
-        从roi_back随机获取坐标
+        在 roi_back 内按截断高斯采样。
         :return:
         """
-        x, y, w, h = self.roi_back
-        x = random_normal_distribution_int(x, x + w)
-        y = random_normal_distribution_int(y, y + h)
-        return x, y
+        return self._circle_normal_coord(self.roi_back)
+
+    def _circle_normal_coord(self, roi: tuple) -> tuple:
+        x, y, width, height = roi
+        if width <= 0 or height <= 0:
+            raise ValueError(f'RuleClick roi must have positive size: {roi}')
+        left, right = ceil(x), ceil(x + width)
+        top, bottom = ceil(y), ceil(y + height)
+        if left >= right or top >= bottom:
+            raise ValueError(f'RuleClick roi contains no integer pixel: {roi}')
+        task_state = RuleClick._task_click_state.get()
+        if task_state is None:
+            self.reset_task_points()
+            task_state = RuleClick._task_click_state.get()
+        rules = task_state['rules']
+        key = (self.name, tuple(roi), self.profile)
+        if key not in rules:
+            rules[key] = {'recent': [], 'count': 0}
+        rule_state = rules[key]
+
+        click_x, click_y = sample_point(TargetBox(x, y, width, height))
+        recent = rule_state['recent']
+        recent.append((click_x, click_y))
+        del recent[:-self._recent_limit]
+        rule_state['count'] += 1
+        self._record_task_click((click_x, click_y))
+        return click_x, click_y
 
     @property
     def center(self) -> tuple:

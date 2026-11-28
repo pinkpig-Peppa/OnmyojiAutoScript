@@ -4,7 +4,7 @@
 import time
 
 from module.base.timer import Timer
-from module.exception import TaskEnd
+from module.exception import TaskEnd, TaskRecoveryFailed
 from module.logger import logger
 from tasks.Component.GeneralBattle.general_battle import GeneralBattle
 from tasks.Component.SwitchSoul.switch_soul import SwitchSoul
@@ -40,10 +40,13 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, DyeTrialsAssets):
         raise TaskEnd('DyeTrials')
 
     def get_all(self):
+        enter_timer = Timer(self._perf_timeout(30)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_FP_CHALLENGE):
                 break
+            if enter_timer.reached():
+                raise TaskRecoveryFailed('DyeTrials enter challenge page timeout')
             if self.appear_then_click(self.I_FP_ACCESS, interval=0.8):
                 continue
             if self.appear_then_click(self.I_FP_ACCESS_1, interval=1.5):

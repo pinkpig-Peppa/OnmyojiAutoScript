@@ -124,9 +124,10 @@ class LoginHandler(BaseTask, RestartAssets, GameUiAssets, GeneralBuffAssets):
                 continue
             # 绑定手机号弹窗
             if self.appear_then_click(self.I_LOGIN_LOGIN_GOTO_BIND_PHONE):
+                bind_timer = Timer(self._perf_timeout(15)).start()
                 while 1:
                     self.screenshot()
-                    if self.appear_then_click(self.I_UI_CANCEL_SAMLL):
+                    if self.appear_then_click(self.I_UI_CANCEL_SAMLL) or bind_timer.reached():
                         logger.info("Close bind phone")
                         break
                 continue
@@ -142,8 +143,11 @@ class LoginHandler(BaseTask, RestartAssets, GameUiAssets, GeneralBuffAssets):
             # 点击屏幕进入游戏
             if self.appear(self.I_LOGIN_SPECIFIC_SERVE, interval=0.6) \
                     and self.ocr_appear_click(self.O_LOGIN_SPECIFIC_SERVE, interval=0.6):
+                svr_timer = Timer(self._perf_timeout(20)).start()
                 while True:
                     self.screenshot()
+                    if svr_timer.reached():
+                        break
                     if self.appear(self.I_LOGIN_SPECIFIC_SERVE):
                         self.click(self.C_LOGIN_ENSURE_LOGIN_CHARACTER_IN_SAME_SVR, interval=2)
                         continue
@@ -183,7 +187,12 @@ class LoginHandler(BaseTask, RestartAssets, GameUiAssets, GeneralBuffAssets):
             self.device.stuck_record_clear()
             self.device.click_record_clear()
             try:
-                self._app_handle_login()
+                login_ctx = getattr(self.device, 'login_wait', None)
+                if callable(login_ctx):
+                    with login_ctx():
+                        self._app_handle_login()
+                else:
+                    self._app_handle_login()
                 # 桌面：登录成功后标记登录态，app_is_running 才会判定为已在游戏中
                 if self.device.is_desktop:
                     self.device.desktop_mark_logged_in()
@@ -331,10 +340,14 @@ class LoginHandler(BaseTask, RestartAssets, GameUiAssets, GeneralBuffAssets):
             if not self.appear(self.I_READ_ALL_MAIL):
                 return False
         logger.info('Harvest mail')
+        mail_open_timer = Timer(self._perf_timeout(20)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_READ_ALL_MAIL):
                 break
+            if mail_open_timer.reached():
+                logger.warning('Open mail timeout')
+                return False
             if self.appear_then_click_multi_scale(self.I_HARVEST_MAIL, interval=1.5, scale_range=(0.8, 1.1)):
                 continue
             if self.appear_then_click(self.I_HARVEST_MAIL_COPY, interval=1.5):

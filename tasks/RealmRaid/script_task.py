@@ -15,8 +15,9 @@ from tasks.Component.SwitchSoul.switch_soul import SwitchSoul
 from tasks.Component.GeneralBattle.battle_wait import battle_wait_strategy
 
 
+from module.base.timer import Timer
 from module.logger import logger
-from module.exception import TaskEnd
+from module.exception import TaskEnd, TaskRecoveryFailed
 from module.atom.image_grid import ImageGrid
 from module.atom.image import RuleImage
 from module.atom.click import RuleClick
@@ -52,18 +53,22 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
         # 点击勋章的挑战 和挑战
         time.sleep(0.2)
         is_click = False
+        medal_timer = Timer(self._perf_timeout(35)).start()
         while 1:
             self.screenshot()
 
             if self.appear(self.I_FIRE, threshold=0.8):
                 break
+            if medal_timer.reached():
+                raise TaskRecoveryFailed('RealmRaid select medal timeout')
 
             if self.appear_then_click(self.I_SOUL_RAID, interval=1.5):
+                soul_timer = Timer(self._perf_timeout(15)).start()
                 while 1:
                     self.screenshot()
                     if self.appear_then_click(self.I_SOUL_RAID, interval=1.5):
                         continue
-                    if not self.appear(self.I_SOUL_RAID, threshold=0.6):
+                    if not self.appear(self.I_SOUL_RAID, threshold=0.6) or soul_timer.reached():
                         break
                 continue
 
@@ -78,8 +83,11 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
 
         # 点击挑战
         self.wait_until_appear(self.I_FIRE)
+        fire_timer = Timer(self._perf_timeout(20)).start()
         while 1:
             self.screenshot()
+            if fire_timer.reached():
+                raise TaskRecoveryFailed('RealmRaid click fire timeout')
             if self.appear_then_click(self.I_FIRE, interval=2):
                 continue
             if not self.appear(self.I_FIRE, threshold=0.8):
@@ -136,9 +144,10 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
         self.screenshot()
         if self.appear(self.I_FROG_RAID):
             logger.info(f'Click {self.I_FROG_RAID.name}')
+            frog_timer = Timer(self._perf_timeout(15)).start()
             while 1:
                 self.screenshot()
-                if not self.appear(self.I_FROG_RAID):
+                if not self.appear(self.I_FROG_RAID) or frog_timer.reached():
                     break
                 if self.appear_then_click(self.I_FROG_RAID, interval=1):
                     continue
@@ -256,9 +265,12 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
         :param lock_team_enable:
         :return:
         """
+        lock_timer = Timer(self._perf_timeout(15)).start()
         if lock_team_enable:
             while 1:
                 self.screenshot()
+                if lock_timer.reached():
+                    raise TaskRecoveryFailed('RealmRaid ensure_lock(True) timeout')
                 if self.appear_then_click(self.I_UNLOCK, interval=1):
                     continue
                 if self.appear_then_click(self.I_UNLOCK_2, interval=1):
@@ -271,6 +283,8 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
         else:
             while 1:
                 self.screenshot()
+                if lock_timer.reached():
+                    raise TaskRecoveryFailed('RealmRaid ensure_lock(False) timeout')
                 if self.appear_then_click(self.I_LOCK, interval=1):
                     continue
                 if self.appear_then_click(self.I_LOCK_2, interval=1):
@@ -428,11 +442,14 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
         # 识别突破卷区域，如果识别到了且其中含有文字，即有聊天框遮挡则进入循环，等待三胜奖励出现并点击，循环退出条件为识别到票（即*/*的形式）
         if text != "":
             if re.search(r'[\u4e00-\u9fff]', text):
+                reward_timer = Timer(self._perf_timeout(15)).start()
                 while 1:
                     self.screenshot()
                     result = self.O_TEXT.ocr(self.device.image)
                     if not re.search(r'[\u4e00-\u9fff]', result) and re.search(r'(\d+)/(\d+)', result):
                         return True
+                    if reward_timer.reached():
+                        return False
                     if self.appear_then_click(self.I_SOUL_RAID, interval=1.5):
                         continue
 
@@ -461,16 +478,22 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
         if not self.appear(self.I_FRESH):
             logger.info(f'No find refresh button and it is in CD')
             return False
+        fresh_timer = Timer(self._perf_timeout(15)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_UI_CONFIRM):
                 break
+            if fresh_timer.reached():
+                return False
             if self.appear_then_click(self.I_FRESH, interval=1):
                 continue
+        confirm_timer = Timer(self._perf_timeout(15)).start()
         while 1:
             self.screenshot()
             if not self.appear(self.I_UI_CONFIRM):
                 return True
+            if confirm_timer.reached():
+                return False
             if self.appear_then_click(self.I_UI_CONFIRM, interval=1):
                 continue
 
@@ -507,8 +530,11 @@ class ScriptTask(GeneralBattle, GameUi, SwitchSoul, RealmRaidAssets):
         click = self.partition[order - 1]
         
         # 进攻循环
+        attack_timer = Timer(self._perf_timeout(30)).start()
         while 1:
             self.screenshot()
+            if attack_timer.reached():
+                raise TaskRecoveryFailed(f'RealmRaid fire({order}) timeout')
             
             # 双重保险：如果在进攻阶段又弹出了窗口，也把它关掉
             if self.appear(self.I_UI_CONFIRM):

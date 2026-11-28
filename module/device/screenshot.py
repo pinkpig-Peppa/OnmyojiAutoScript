@@ -158,6 +158,7 @@ class Screenshot(Adb, DroidCast, Scrcpy, Window, NemuIpc):
                 Minimum interval between 2 screenshots in seconds.
                 Or None for Optimization_ScreenshotInterval, 'combat' for Optimization_CombatScreenshotInterval
         """
+        combat = interval == 'combat'
         if interval is None:
             origin = self.config.script.optimization.screenshot_interval
             # 分支判断放在夹取之前：写回发生在各自的 clamp 之后，先夹取会按错误的
@@ -193,6 +194,10 @@ class Screenshot(Adb, DroidCast, Scrcpy, Window, NemuIpc):
         # if self.config.script.device.screenshot_method == 'scrcpy':
         if self.config.script.device.screenshot_method == 'scrcpy':
             interval = 0.1
+
+        performance = getattr(self, 'performance', None)
+        if performance is not None:
+            interval = performance.screenshot_interval(interval, combat=combat)
 
         if interval != self._screenshot_interval.limit:
             logger.info(f'Screenshot interval set to {interval}s')

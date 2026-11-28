@@ -1,5 +1,6 @@
 
 from collections import deque
+from contextlib import contextmanager
 from datetime import datetime
 import time
 
@@ -8,11 +9,13 @@ from module.device.pkg_resources import get_distribution
 # Just avoid being removed by import optimization
 _ = get_distribution
 
+from module.base.utils import get_color
 from module.device.env import IS_WINDOWS
 from module.base.timer import Timer
 from module.config.utils import get_server_next_update
 from module.device.app_control import AppControl
 from module.device.control import Control
+from module.device.performance import PerformanceProfile
 if IS_WINDOWS:
     from module.device.desktop_device import DesktopDevice
 else:
@@ -30,6 +33,10 @@ from module.logger import logger
 
 
 class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
+    performance = PerformanceProfile()
+    _login_deadline = None
+    _last_control_time = None
+    _error_learning = None
     _screen_size_checked = False
     _escape_attempts = 0
     _escape_generation = 0
@@ -76,10 +83,15 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
                     )
                     raise RequestHumanTakeover
 
+        self.performance = PerformanceProfile(bool(getattr(self.config.script.device, 'low_spec_mode', False)))
         self.detect_record = set()
         self.click_record = deque(maxlen=15)
-        self.stuck_timer = Timer(60, count=60).start()
+        self.stuck_timer = Timer(self.performance.timeout(60), count=60).start()
         self.stuck_timer_long = Timer(300, count=300).start()
+        self._login_deadline = None
+        self._last_control_time = None
+        self._error_learning = None
+        self._screenshot_interval = Timer(0.1)
         self._accepted_invitation_generation = 0
         self._task_flow_progress_generation = 0
         self._task_flow_round_generation = 0
@@ -167,6 +179,28 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
 
         return self.image
 
+    @contextmanager
+    def login_wait(self):
+        """Keep slow-login protection across clicks, with a finite total budget."""
+        if not self.performance.low_spec:
+            yield
+            return
+        previous = self._login_deadline
+        self._login_deadline = previous or (time.monotonic() + self.performance.timeout(300))
+        self.stuck_record_clear()
+        try:
+            yield
+        finally:
+            self._login_deadline = previous
+            self.stuck_record_clear()
+            self.click_record_clear()
+
+    def _check_login_deadline(self) -> bool:
+        if self._login_deadline is not None and time.monotonic() >= self._login_deadline:
+            self.recover_by_escape('Low spec login exceeded 900 seconds')
+            return True
+        return False
+
     def reset_task_recovery(self):
         self._task_flow_guard_disabled = False
         self._escape_attempts = 0
@@ -189,6 +223,23 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
             raise GameNotRunningError('Game died')
         if self._escape_attempts >= 3:
             raise TaskRecoveryFailed(f'ESC recovery failed after 3 attempts: {reason}')
+        learning = getattr(self, '_error_learning', None)
+        if learning is not None:
+            try:
+                learning_reason = (
+                    'wait:' + ','.join(sorted(self.detect_record))
+                    if reason.startswith('Wait too long:')
+                    else reason
+                )
+                plan = learning.begin(learning_reason, getattr(self, 'image', None))
+                if plan:
+                    logger.info(
+                        f'Learned recovery: {plan["action"]}, verify page={plan["page"]}, '
+                        f'settle={plan["settle"]:.1f}s'
+                    )
+            except Exception as exc:
+                logger.warning(f'Error learning disabled for this task: {exc}')
+                self._error_learning = None
         if not getattr(self, '_failed_original_page_captured', False):
             try:
                 from module.script.failed_task_recovery import page_key
@@ -208,6 +259,8 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
         self._click_recovery_buttons.clear()
         self.click_record_clear()
         records = set(self.detect_record)
+        if self._login_deadline is not None:
+            self._login_deadline = time.monotonic() + self._recovery_timeout(300)
         self.stuck_record_clear()
         self.detect_record.update(records)
 
@@ -232,6 +285,15 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
             self._verified_click = None
         for button in buttons:
             self.click_record_remove(getattr(button, 'name', button))
+        reason = getattr(self, '_click_recovery_reason', '')
+        for prefix in ('Too many click for a button: ', 'Too many click between 2 buttons: '):
+            if reason.startswith(prefix):
+                blocked = set(reason[len(prefix):].split(', '))
+                if blocked <= names:
+                    self._click_recovery_at = None
+                    self._click_recovery_reason = ''
+                    self._click_recovery_buttons.clear()
+                break
 
     def release_during_wait(self):
         # Scrcpy server is still sending video stream,
@@ -253,7 +315,7 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
         logger.info(f'Add stuck record: {button}')
 
     def stuck_record_clear(self):
-        self.detect_record = set()
+        self.detect_record = {'LOGIN_CHECK'} if self._login_deadline is not None else set()
         self.stuck_timer.reset()
         self.stuck_timer_long.reset()
 
@@ -261,7 +323,9 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
         """
         Trigger bounded ESC recovery (max 3 attempts) on stuck wait; raise GameNotRunningError if dead.
         """
-        if self._check_click_recovery():
+        if self._check_login_deadline() or self._check_click_recovery():
+            return False
+        if self._login_deadline is not None:
             return False
         reached = self.stuck_timer.reached()
         reached_long = self.stuck_timer_long.reached()
@@ -279,13 +343,21 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
         return False
 
     def handle_control_check(self, button):
-        if self._await_recovery_frame:
+        if self._await_recovery_frame or self._check_login_deadline():
             return False
         if self._check_click_recovery():
             if self._await_recovery_frame or str(button) in self._click_recovery_buttons:
                 return False
             self._click_recovery_at = None
             self._click_recovery_buttons.clear()
+        click_interval = self.performance.click_interval if hasattr(self, 'performance') else 0
+        if click_interval and self._last_control_time is not None:
+            remaining = click_interval - (time.monotonic() - self._last_control_time)
+            if remaining > 0:
+                time.sleep(remaining)
+        if self._check_login_deadline():
+            return False
+        self._last_control_time = time.monotonic()
         self.stuck_record_clear()
         self.click_record_add(button)
         history = set(self.click_record)
@@ -331,16 +403,23 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
         Raises:
             GameTooManyClickError:
         """
+        from module.device.repeat_policy import chess_repeat_unrestricted
+        if chess_repeat_unrestricted(self):
+            return
+        if not self.click_record:
+            return
         count = {}
         for key in self.click_record:
             count[key] = count.get(key, 0) + 1
         count = sorted(count.items(), key=lambda item: item[1], reverse=True)
-        if count[0][1] >= 10:
+        click_limit = self.performance.click_limit if hasattr(self, 'performance') else 10
+        alt_limit = self.performance.alternating_click_limit if hasattr(self, 'performance') else 6
+        if count[0][1] >= click_limit:
             logger.warning(f'Too many click for a button: {count[0][0]}')
             logger.warning(f'History click: {[str(prev) for prev in self.click_record]}')
             self.click_record_clear()
             raise GameTooManyClickError(f'Too many click for a button: {count[0][0]}')
-        if len(count) >= 2 and count[0][1] >= 6 and count[1][1] >= 6:
+        if len(count) >= 2 and count[0][1] >= alt_limit and count[1][1] >= alt_limit:
             logger.warning(f'Too many click between 2 buttons: {count[0][0]}, {count[1][0]}')
             logger.warning(f'History click: {[str(prev) for prev in self.click_record]}')
             self.click_record_clear()
@@ -393,6 +472,34 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
         super().app_stop()
         self.stuck_record_clear()
         self.click_record_clear()
+
+    def wait_app_start_ready(self, timeout: float = 15.0, interval: float = 0.5) -> None:
+        """
+        Wait after app_start until the foreground app is running and screen is no longer pure black.
+        """
+        deadline = time.monotonic() + self._recovery_timeout(timeout)
+        screenshot_method = self.screenshot_methods.get(
+            self.config.script.device.screenshot_method,
+            self.screenshot_adb,
+        )
+
+        while time.monotonic() < deadline:
+            if not self.app_is_running():
+                time.sleep(interval)
+                continue
+            try:
+                image = screenshot_method()
+            except Exception as e:
+                logger.info(f'Wait game start ready: screenshot probe failed: {e}')
+                time.sleep(interval)
+                continue
+            color = get_color(image, area=(0, 0, 1280, 720))
+            if sum(color) >= 1:
+                logger.info(f'Game start ready, frame color: {color}')
+                return
+            time.sleep(interval)
+
+        logger.info('Wait game start ready timeout, continue with login flow')
 
 
 if __name__ == "__main__":

@@ -7,6 +7,11 @@ from pathlib import Path
 from module.logger import logger
 
 _CONFIG_NAME_PATTERN = re.compile(r'^[^\\/:*?"<>|\x00-\x1f]+$')
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {'CON', 'PRN', 'AUX', 'NUL'}
+    | {f'COM{i}' for i in range(1, 10)}
+    | {f'LPT{i}' for i in range(1, 10)}
+)
 
 
 def safe_config_path(name: str, config_path: Path | None = None) -> Path:
@@ -16,7 +21,9 @@ def safe_config_path(name: str, config_path: Path | None = None) -> Path:
     :param config_path: config 目录，默认 Path.cwd() / 'config'
     """
     if (not isinstance(name, str) or name in ('', '.', '..')
-            or not _CONFIG_NAME_PATTERN.fullmatch(name) or name != name.strip()):
+            or not _CONFIG_NAME_PATTERN.fullmatch(name) or name != name.strip()
+            or name.endswith('.')
+            or name.split('.')[0].upper() in _WINDOWS_RESERVED_NAMES):
         raise ValueError(f'invalid config name: {name!r}')
     base = (config_path or (Path.cwd() / 'config')).resolve()
     target = (base / f'{name}.json').resolve()
