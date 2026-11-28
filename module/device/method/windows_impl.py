@@ -41,6 +41,20 @@ class Window(Handle):
     DESKTOP_MOVE_STEP = 60
     DESKTOP_MOVE_MAX_POINTS = 12
 
+    def press_escape_window_message(self):
+        from win32con import WM_KEYDOWN, WM_KEYUP, VK_ESCAPE
+        from win32api import MapVirtualKey
+        if getattr(self, 'is_desktop_window', False):
+            self.desktop_window_restore_if_minimized()
+            hwnd = self.root_handle_num
+        else:
+            hwnd = self.root_node.num
+        if not IsWindow(hwnd):
+            raise RuntimeError('Configured game window is no longer valid')
+        scan = MapVirtualKey(VK_ESCAPE, 0)
+        PostMessage(hwnd, WM_KEYDOWN, VK_ESCAPE, 1 | (scan << 16))
+        PostMessage(hwnd, WM_KEYUP, VK_ESCAPE, 1 | (scan << 16) | (3 << 30))
+
     def __init__(self, *args, **kwargs):
         logger.info("Window init")
         super().__init__(*args, **kwargs)

@@ -1,6 +1,7 @@
 
 from collections import deque
 from datetime import datetime
+import time
 
 # Patch pkg_resources before importing adbutils and uiautomator2
 from module.device.pkg_resources import get_distribution
@@ -22,6 +23,7 @@ from module.device.screenshot import Screenshot
 from module.exception import (GameNotRunningError,
                               GameStuckError,
                               GameTooManyClickError,
+                              TaskRecoveryFailed,
                               RequestHumanTakeover,
                               EmulatorNotRunningError)
 from module.logger import logger
@@ -29,11 +31,16 @@ from module.logger import logger
 
 class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
     _screen_size_checked = False
+    _escape_attempts = 0
     _escape_generation = 0
     _accepted_invitation_generation = 0
     _task_flow_progress_generation = 0
     _task_flow_round_generation = 0
     _task_flow_guard_disabled = False
+    _click_recovery_at = None
+    _click_recovery_reason = ''
+    _click_recovery_buttons = set()
+    _await_recovery_frame = False
     _verified_click = None
     _confirm_retry_permit = None
     _click_verification_enabled = True
@@ -140,8 +147,6 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
         if flow_guard is not None:
             flow_guard.check()
 
-        self.stuck_record_check()
-
         # 桌面模式：窗口缺失说明客户端当前不可用（启动期未出窗口，或客户端崩了）。
         # 直接截图会抛 (1400, '无效的窗口句柄') 搞崩整个进程，必须先拦下；拉客户端
         # 是 Restart 的职责。最小化不算窗口缺失——BitBlt 截图前会先还原窗口。
@@ -156,13 +161,62 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
         if self.handle_night_commission():
             super().screenshot()
 
+        self._await_recovery_frame = False
+        if not getattr(self, '_handling_invitation', False) and not getattr(self, '_recovery_handling', False):
+            self.stuck_record_check()
+
         return self.image
 
     def reset_task_recovery(self):
         self._task_flow_guard_disabled = False
+        self._escape_attempts = 0
         self._escape_generation = 0
+        self._click_recovery_at = None
+        self._click_recovery_reason = ''
+        self._click_recovery_buttons = set()
+        self._await_recovery_frame = False
         self._verified_click = None
         self._confirm_retry_permit = None
+
+    def _recovery_timeout(self, seconds: float) -> float:
+        performance = getattr(self, 'performance', None)
+        return performance.timeout(seconds) if performance is not None else seconds
+
+    def recover_by_escape(self, reason: str) -> None:
+        if getattr(self, 'is_desktop', False) and self.app_lost_login():
+            raise GameNotRunningError('Client dropped back to login')
+        if not self.app_is_running():
+            raise GameNotRunningError('Game died')
+        if self._escape_attempts >= 3:
+            raise TaskRecoveryFailed(f'ESC recovery failed after 3 attempts: {reason}')
+        if not getattr(self, '_failed_original_page_captured', False):
+            try:
+                from module.script.failed_task_recovery import page_key
+                self._failed_original_page = page_key(self.config, self)
+            except Exception:
+                self._failed_original_page = None
+            self._failed_original_page_captured = True
+        self._escape_attempts += 1
+        logger.warning(f'ESC recovery {self._escape_attempts}/3: {reason}')
+        try:
+            self.press_escape()
+        except Exception as exc:
+            raise TaskRecoveryFailed(f'Unable to send ESC: {exc}') from exc
+        self._escape_generation = getattr(self, '_escape_generation', 0) + 1
+        self._await_recovery_frame = True
+        self._click_recovery_at = None
+        self._click_recovery_buttons.clear()
+        self.click_record_clear()
+        records = set(self.detect_record)
+        self.stuck_record_clear()
+        self.detect_record.update(records)
+
+    def _check_click_recovery(self) -> bool:
+        if self._click_recovery_at is None:
+            return False
+        if time.monotonic() - self._click_recovery_at >= self._recovery_timeout(60):
+            self.recover_by_escape(self._click_recovery_reason)
+        return True
 
     def confirm_task_round_progress(self):
         """Renew task residence only after a new round is confirmed in fresh frames."""
@@ -205,9 +259,10 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
 
     def stuck_record_check(self):
         """
-        Raises:
-            GameStuckError:
+        Trigger bounded ESC recovery (max 3 attempts) on stuck wait; raise GameNotRunningError if dead.
         """
+        if self._check_click_recovery():
+            return False
         reached = self.stuck_timer.reached()
         reached_long = self.stuck_timer_long.reached()
 
@@ -220,17 +275,29 @@ class Device(DesktopDevice, Platform, Screenshot, Control, AppControl):
 
         logger.warning('Wait too long')
         logger.warning(f'Waiting for {self.detect_record}')
-        self.stuck_record_clear()
-
-        if self.app_is_running():
-            raise GameStuckError(f'Wait too long')
-        else:
-            raise GameNotRunningError('Game died')
+        self.recover_by_escape(f'Wait too long: {self.detect_record}')
+        return False
 
     def handle_control_check(self, button):
+        if self._await_recovery_frame:
+            return False
+        if self._check_click_recovery():
+            if self._await_recovery_frame or str(button) in self._click_recovery_buttons:
+                return False
+            self._click_recovery_at = None
+            self._click_recovery_buttons.clear()
         self.stuck_record_clear()
         self.click_record_add(button)
-        self.click_record_check()
+        history = set(self.click_record)
+        try:
+            self.click_record_check()
+        except GameTooManyClickError as exc:
+            self._click_recovery_at = time.monotonic()
+            self._click_recovery_reason = str(exc)
+            self._click_recovery_buttons = history
+            logger.warning(f'Repeated clicks paused; wait {self._recovery_timeout(60)}s before ESC')
+            return False
+        return True
 
     def click_record_add(self, button):
         self.click_record.append(str(button))

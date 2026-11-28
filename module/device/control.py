@@ -18,6 +18,23 @@ class Control(Minitouch, Adb, Scrcpy, Window):
         # Will be overridden in Device
         pass
 
+    def press_escape(self):
+        """Dispatch a single device-scoped Back/ESC recovery action.
+
+        Official Windows PC desktop clients receive VK_ESCAPE on their bound
+        window handle; Android emulators always receive KEYCODE_BACK over ADB
+        (including when click control_method is window_message) so delivery to
+        the Android guest is deterministic.
+        """
+        if getattr(self, 'is_desktop', False) or getattr(self, 'is_desktop_window', False):
+            self.press_escape_window_message()
+            logger.info('ESC recovery: VK_ESCAPE dispatched to desktop client window; awaiting page verification')
+            return
+        result = self.adb_shell(['input', 'keyevent', 'KEYCODE_BACK'])
+        if result and str(result).strip():
+            raise RuntimeError(f'Android back input returned an error: {result}')
+        logger.info('ESC recovery: Android BACK dispatched to configured device; awaiting page verification')
+
     @cached_property
     def click_methods(self):
         return {
@@ -144,11 +161,14 @@ class Control(Minitouch, Adb, Scrcpy, Window):
         :param duration: 单位是s
         :return:
         """
-        self.handle_control_check(control_name)
+        if self.handle_control_check(control_name) is False:
+            return False
         x, y = ensure_int(x, y)
         if duration is None:
             duration = 0.8
         duration = ensure_time(duration)
+        verify = getattr(self, '_click_verification_enabled', True)
+        before = before_click(self, x, y, control_name) if verify else None
         logger.info(
             'Click %s @ %s %s' % (point2str(x, y), control_name, duration)
         )
@@ -156,9 +176,12 @@ class Control(Minitouch, Adb, Scrcpy, Window):
             self.config.script.device.control_method,
             self.long_click_adb)
         method(x, y, duration)
+        if before is not None:
+            after_click(self, x, y, control_name, before)
 
     def swipe(self, p1, p2, duration=(0.1, 0.2), control_name='SWIPE', distance_check=True):
-        self.handle_control_check(control_name)
+        if self.handle_control_check(control_name) is False:
+            return False
         p1, p2 = ensure_int(p1, p2)
         duration = ensure_time(duration)
         method = self.config.script.device.control_method
@@ -234,7 +257,8 @@ class Control(Minitouch, Adb, Scrcpy, Window):
 
     def drag(self, p1, p2, segments=1, shake=(0, 15), point_random=(-10, -10, 10, 10), shake_random=(-5, -5, 5, 5),
              swipe_duration=0.25, shake_duration=0.1, name='DRAG'):
-        self.handle_control_check(name)
+        if self.handle_control_check(name) is False:
+            return False
         p1, p2 = ensure_int(p1, p2)
         logger.info(
             'Drag %s -> %s' % (point2str(*p1), point2str(*p2))
