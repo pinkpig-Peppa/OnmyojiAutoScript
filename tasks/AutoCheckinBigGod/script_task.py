@@ -14,7 +14,6 @@ if __name__ == '__main__' and 'tasks' not in sys.modules:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 
 import requests
-import urllib3
 
 from tasks.base_task import BaseTask
 from module.logger import logger
@@ -28,7 +27,6 @@ except ImportError:
         "Run: ./toolkit/python.exe -m pip install oas-checkin-biggod"
     )
 
-urllib3.disable_warnings()
 os.environ['MSYS_NO_PATHCONV'] = '1'
 
 WELFARE_BASE = "https://god-welfare.gameyw.netease.com"
@@ -67,7 +65,7 @@ class ScriptTask(BaseTask):
         self._frida_attached_pid = None  # REPL 当前 attach 的 PID
 
         self.session = requests.Session()
-        self.session.verify = False
+        self.session.verify = True
 
         logger.hr('AutoCheckinBigGod', level=1)
 

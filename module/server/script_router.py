@@ -116,8 +116,22 @@ async def task_group_copy(task_name: str, group_name: str, dest_config_name: str
 
 
 # ---------------------------------   脚本实例管理   ----------------------------------
+def _validated_config(script_name: str):
+    try:
+        safe_config_path(script_name)
+        return mm.config_cache(script_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f'config {script_name}.json not found')
+
+
 @script_app.get('/{script_name}/start')
 async def script_start(script_name: str):
+    try:
+        safe_config_path(script_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if script_name not in mm.script_process:
         try:
             mm.script_process[script_name] = ScriptProcess(script_name)
@@ -128,6 +142,10 @@ async def script_start(script_name: str):
 
 @script_app.get('/{script_name}/stop')
 async def script_stop(script_name: str):
+    try:
+        safe_config_path(script_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if script_name not in mm.script_process:
         logger.warning(f'[{script_name}] script process does not exist')
         return
@@ -136,10 +154,11 @@ async def script_stop(script_name: str):
 
 @script_app.get('/{script_name}/{task}/args')
 async def script_task(script_name: str, task: str):
-    return mm.config_cache(script_name).model.script_task(task)
+    return _validated_config(script_name).model.script_task(task)
 
 @script_app.put('/{script_name}/{task}/{group}/{argument}/value')
 async def script_task(script_name: str, task: str, group: str, argument: str, types: str, value):
+    config = _validated_config(script_name)
     try:
         match types:
             case 'integer':
@@ -169,11 +188,15 @@ async def script_task(script_name: str, task: str, group: str, argument: str, ty
     except Exception as e:
         # 类型不正确
         raise HTTPException(status_code=400, detail=f'Argument type error: {e}')
-    return mm.config_cache(script_name).model.script_set_arg(task, group, argument, value)
+    return config.model.script_set_arg(task, group, argument, value)
 
 
 @script_app.put('/{script_name}/{task}/sync_next_run')
 async def sync_next_run(script_name: str, task: str, target_dt: str):
+    try:
+        safe_config_path(script_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if script_name not in mm.script_process:
         return False
     config = mm.config_cache(script_name)
@@ -222,7 +245,13 @@ async def script_task_log(script_name: str):
 async def websocket_endpoint(websocket: WebSocket, script_name: str):
     script_process = None
     try:
-        if not State.check_webui_key(websocket.query_params.get("key")):
+        try:
+            safe_config_path(script_name)
+        except ValueError:
+            await websocket.close(code=1008)
+            return
+        client_host = websocket.client.host if websocket.client else None
+        if not State.check_webui_key(websocket.query_params.get("key"), client_host=client_host):
             await websocket.close(code=1008)
             return
         if script_name not in mm.script_process:

@@ -58,7 +58,7 @@ class ConfigModel:
     SSHExecutable: Optional[str] = None
 
     # Webui
-    WebuiHost: str = "0.0.0.0"
+    WebuiHost: str = "127.0.0.1"
     WebuiPort: int = 22267
     Language: str = "en-US"
     Theme: str = "default"

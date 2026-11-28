@@ -8,7 +8,7 @@ from time import sleep
 
 from module.base.timer import Timer
 from module.logger import logger
-from module.exception import TaskEnd
+from module.exception import TaskEnd, TaskRecoveryFailed
 
 
 from tasks.Component.RightActivity.right_activity import RightActivity
@@ -87,10 +87,13 @@ class ScriptTask(RightActivity, Battle, GeneralBattle, SwitchSoul, Star56):
                                          self.config.meta_demon.switch_soul.team_name)
 
         self.enter(self.I_RIGHT_ENTER)
+        enter_timer = Timer(self._perf_timeout(35)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_FIND_DEMON) or self.appear(self.I_BATTLE_DEMON):
                 break
+            if enter_timer.reached():
+                raise TaskRecoveryFailed('MetaDemon enter main page timeout')
 
             if self.ui_reward_appear_click():
                 continue
@@ -234,20 +237,28 @@ class ScriptTask(RightActivity, Battle, GeneralBattle, SwitchSoul, Star56):
         @return:
         """
         logger.info('Find demon')
+        summon_timer = Timer(self._perf_timeout(30)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_BATTLE_DEMON) and not self.appear(self.I_BOSS_EMPTY):
                 break
+            if summon_timer.reached():
+                logger.warning('MetaDemon summon boss timeout')
+                return False
             if self.appear_then_click(self.I_FIND_DEMON, interval=3.5):
                 continue
         self.screenshot()
         if self.is_star56():
             logger.info('Star 5 or 6 demon found')
+            name_timer = Timer(self._perf_timeout(8)).start()
             while 1:
                 sleep(0.4)
                 self.screenshot()
                 detect_full_name = self.O_MD_FULL_NAME.ocr_single(self.device.image)
                 if detect_full_name:
+                    break
+                if name_timer.reached():
+                    detect_full_name = '高星鬼王'
                     break
             logger.info(f'召唤到高星鬼王: {detect_full_name}')
             self.config.notifier.push(content=f'召唤到高星鬼王: {detect_full_name}', title='超鬼王')
@@ -301,9 +312,10 @@ class ScriptTask(RightActivity, Battle, GeneralBattle, SwitchSoul, Star56):
         if not self.appear(self.I_MD_WIN):
             return HookSignal.CONTINUE
         logger.info('Win battle')
+        win_timer = Timer(self._perf_timeout(20)).start()
         while 1:
             self.screenshot()
-            if not self.appear(self.I_MD_WIN):
+            if not self.appear(self.I_MD_WIN) or win_timer.reached():
                 break
             self.click(self.I_MD_WIN)
             sleep(0.5)

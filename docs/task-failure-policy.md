@@ -20,6 +20,17 @@ GUI 的「执行任务失败后设定」（`scheduler.failure_interval`）决定
   - `ui_click`、`ui_clicks`、`ui_click_until_disappear`、`ui_click_until_smt_disappear`、`ui_click_multi_scale` 均采用有限时间窗 + `_ui_verify` 双新鲜帧确认。
 - **点击响应校验与确认重试**：`click_verification` 在点击前后比对局部像素，拦截对无响应控件的盲目连点；`click_confirm_once` 仅允许非消费类确认/关闭按钮在连续两帧上下文未变时消耗唯一许可重试一次。
 - **多尺度模板搜索网格上限（`module/image/scales.py` & `RuleImage.match_multi_scale`）**：本地与图像服务统一限制单次多尺度网格最多 `2048` 个采样点，拒绝非有限边界与无法推进浮点数的极小步长。
+- **有界 ESC 恢复与失败现场安全重入（`recover_by_escape` & `failed_task_recovery`）**：
+  - 单任务最多发送 3 次回退动作（模拟器走 ADB `KEYCODE_BACK`，桌面客户端走 `VK_ESCAPE`），第 4 次直接抛出 `TaskRecoveryFailed`。
+  - 恢复后若已回到庭院或离开原失败页面，主动回退旧任务调用栈，避免陈旧中间态继续执行；跨任务切换前强制校验庭院落点。
+- **低端机性能预算与对弈重复点击策略（`PerformanceProfile` & `repeat_policy`）**：
+  - 开启 `low_spec_mode` 后，普通等待预算按 3 倍放宽（空闲等待 `180s`、登录总预算 `900s`），战斗长等待保持 `300s`，截图最小间隔放宽至 `0.8s`（战斗 `1.5s`），操作最小间隔 `1.2s`，并同步启用图像帧缓存 `10s` 与 OCR `30s` 超时重连保护。
+  - `chess_repeat_unrestricted` 仅在活动 `TaskFlowGuard(command='Chess')` 且非协战弹窗期间豁免对弈竞猜重复押注点击限制。
+- **拟人点击与本地错误经验学习（`human_click` & `error_learning`）**：
+  - `RuleClick` 统一采用截断高斯区域采样；`Control.click` 在 `window_message`（含桌面客户端与模拟器）上注入最小急动度三次贝塞尔悬停轨迹并在异常中断时保证按键释放，在触摸后端仅保持驻留按压而不产生滑动。
+  - `error_learning` 以本机 SQLite 记录有界恢复经验（最多 5000 条、30 天过期，绝不存储可执行动作或点击坐标），仅在同一任务/设备/模式连续两次恢复后任务明确成功时复用稳定等待时长与首选页面识别顺序；可通过 `python dev_tools/error_learning.py show|export|clear --all` 审计或清空。
+- **跨进程 RPC 与部署安全基线**：
+  - OCR 与图像 RPC 服务统一采用无 `pickle` 的有界二进制数组编解码器（`module/base/array_codec.py`），彻底拒绝任意 `pickle` 载荷；单机默认监听 `127.0.0.1`，WebUI 未配置口令时自动拒绝非回环来源请求。
 
 ## 3. 静态循环盘点与回归门禁
 

@@ -101,7 +101,9 @@ class ScriptTask(GameUi, Summon, DailyTriflesAssets):
 
         logger.info('Summon one RECALL')
         self.wait_until_appear(self.I_RECALL_TICKET)
-        while True:
+        recall_rounds = 0
+        while recall_rounds < 50:
+            recall_rounds += 1
             ticket_info = self.O_RECALL_TICKET_AREA.ocr(self.device.image)
             # 处理 None 和空字符串
             if ticket_info is None or ticket_info == '':
@@ -122,15 +124,20 @@ class ScriptTask(GameUi, Summon, DailyTriflesAssets):
             self.S_RANDOM_SWIPE_2.name = 'S_RANDOM_SWIPE'
             self.S_RANDOM_SWIPE_3.name = 'S_RANDOM_SWIPE'
             self.S_RANDOM_SWIPE_4.name = 'S_RANDOM_SWIPE'
+            ticket_timer = Timer(self._perf_timeout(30)).start()
             while 1:
                 self.screenshot()
                 if self.appear(self.I_RECALL_ONE_TICKET):
                     break
+                if ticket_timer.reached():
+                    logger.warning('Wait RECALL_ONE_TICKET timeout')
+                    return
                 if self.appear_then_click(self.I_RECALL_TICKET, interval=1):
                     continue
 
             # 画一张票
             sleep(1)
+            draw_timer = Timer(self._perf_timeout(45)).start()
             while 1:
                 self.screenshot()
                 if self.appear(self.I_RECALL_SM_CONFIRM, interval=0.6):
@@ -139,6 +146,9 @@ class ScriptTask(GameUi, Summon, DailyTriflesAssets):
                 if self.appear(self.I_SM_CONFIRM_2, interval=0.6):
                     self.ui_click_until_disappear(self.I_SM_CONFIRM_2)
                     break
+                if draw_timer.reached():
+                    logger.warning('Summon draw confirmation timeout')
+                    return
                 if self.appear(self.I_RECALL_ONE_TICKET, interval=1):
                     # 某些时候会点击到 “语言召唤”
                     if self.appear_then_click(self.I_UI_CANCEL, interval=0.8):
@@ -152,10 +162,14 @@ class ScriptTask(GameUi, Summon, DailyTriflesAssets):
 
     def run_luck_msg(self):
         self.goto_page(page_friends)
+        enter_timer = Timer(self._perf_timeout(20)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_LUCK_TITLE):
                 break
+            if enter_timer.reached():
+                logger.warning('Enter luck msg timeout')
+                return
             if self.appear_then_click(self.I_FRIENDSHIP_UP, interval=1):
                 continue
             if self.ocr_appear_click(self.O_LUCK_MSG, interval=1):
@@ -181,10 +195,14 @@ class ScriptTask(GameUi, Summon, DailyTriflesAssets):
 
     def run_friend_love(self):
         self.goto_page(page_friends)
+        love_timer = Timer(self._perf_timeout(20)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_L_LOVE):
                 break
+            if love_timer.reached():
+                logger.warning('Enter friend love timeout')
+                return
             if self.appear_then_click(self.I_FRIENDSHIP_UP, interval=1):
                 continue
             if self.appear_then_click(self.I_L_FRIENDS, interval=1):
@@ -224,9 +242,10 @@ class ScriptTask(GameUi, Summon, DailyTriflesAssets):
         self.goto_page(page_store_gift_room)
 
         cnt = 0
+        sign_timer = Timer(self._perf_timeout(20)).start()
         while 1:
             self.screenshot()
-            if self.appear(self.I_GIFT_SIGN) or cnt >=4:
+            if self.appear(self.I_GIFT_SIGN) or cnt >= 4 or sign_timer.reached():
                 break
             if self.appear_then_click(self.I_GIFT_RECOMMEND, interval=1):
                 cnt += 1
@@ -244,11 +263,15 @@ class ScriptTask(GameUi, Summon, DailyTriflesAssets):
     def run_buy_sushi(self):
 
         # 进入Special
+        special_timer = Timer(self._perf_timeout(25)).start()
         while 1:
             from tasks.RichMan.assets import RichManAssets
             self.screenshot()
             if self.appear(RichManAssets.I_SIDE_CHECK_SPECIAL):
                 break
+            if special_timer.reached():
+                logger.warning('Enter mall special tab timeout')
+                return
             if self.appear_then_click(RichManAssets.I_MALL_SUNDRY, interval=1):
                 continue
             if self.appear_then_click(RichManAssets.I_SIDE_SURE_SPECIAL, interval=1):

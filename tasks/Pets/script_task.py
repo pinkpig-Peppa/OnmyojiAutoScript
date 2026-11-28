@@ -1,8 +1,9 @@
 # This Python file uses the following encoding: utf-8
 # @author runhey
 # github https://github.com/runhey
+from module.base.timer import Timer
 from module.logger import logger
-from module.exception import TaskEnd
+from module.exception import TaskEnd, TaskRecoveryFailed
 
 from tasks.GameUi.game_ui import GameUi
 from tasks.GameUi.page import page_main
@@ -15,10 +16,13 @@ class ScriptTask(GameUi, PetsAssets):
         self.goto_page(page_main)
         con: PetsConfig = self.config.pets.pets_config
         # 进入
+        enter_timer = Timer(self._perf_timeout(30)).start()
         while 1:
             self.screenshot()
             if self.appear(self.I_PET_FEAST):
                 break
+            if enter_timer.reached():
+                raise TaskRecoveryFailed('Pets enter pet house timeout')
             if self.appear_then_click(self.I_PET_HOUSE, interval=1):
                 continue
             if self.appear_then_click(self.I_PET_CLAW, interval=1):

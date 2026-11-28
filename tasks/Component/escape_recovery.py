@@ -25,12 +25,17 @@ def handle_escape_recovery(task):
         navigator.navigator.edge_penalties.clear()
         confirmed_generation = None
         cancelled_generation = None
+        waited_generation = None
         performance = getattr(device, 'performance', None)
         timeout = performance.timeout(60) if performance is not None else 60
         isolated = getattr(task, '_isolated_recovery_navigation', False)
         deadline = monotonic() + timeout
         while monotonic() < deadline:
-            device.sleep(0.8)
+            learning = getattr(device, '_error_learning', None)
+            plan = learning.plan if learning is not None else None
+            delay = plan['settle'] if plan and waited_generation != device._escape_generation else 0.8
+            waited_generation = device._escape_generation
+            device.sleep(delay)
             device.screenshot()
             cancel_point = game_exit_cancel_point(device.image)
             if cancel_point is not None:
@@ -41,6 +46,8 @@ def handle_escape_recovery(task):
                         raise TaskRecoveryFailed('ESC recovery exit-game cancel input was blocked')
                     cancelled_generation = device._escape_generation
                 continue
+            learning = getattr(device, '_error_learning', None)
+            plan = learning.plan if learning is not None else None
             task._seen_escape_generation = device._escape_generation
             point = battle_exit_confirm_point(device.image)
             if point is not None:
@@ -48,15 +55,23 @@ def handle_escape_recovery(task):
                     logger.info('ESC recovery: confirm exit battle dialog')
                     if device.click(*point, control_name='ESC_EXIT_BATTLE_CONFIRM') is not False:
                         confirmed_generation = device._escape_generation
+                        if learning is not None:
+                            learning.confirmed_exit()
                     else:
                         raise TaskRecoveryFailed('ESC recovery battle exit input was blocked')
                 continue
             before_detection = device._escape_generation
-            if isolated:
-                page = navigator._detect_current_page_with_fallback(
-                    skip_first_screenshot=True, categories=navigator._default_detect_categories())
-            else:
-                page = navigator._detect_current_page(skip_first_screenshot=True)
+            page = None
+            if plan:
+                preferred = navigator.navigator.pages.get(plan['page'])
+                if preferred is not None:
+                    page = navigator._detect_pages([preferred], skip_first_screenshot=True)
+            if page is None:
+                if isolated:
+                    page = navigator._detect_current_page_with_fallback(
+                        skip_first_screenshot=True, categories=navigator._default_detect_categories())
+                else:
+                    page = navigator._detect_current_page(skip_first_screenshot=True)
             if device._escape_generation != before_detection:
                 continue
             if page is None:
@@ -66,6 +81,8 @@ def handle_escape_recovery(task):
                     return
                 continue
             navigator.navigator.current_page = page
+            if learning is not None:
+                learning.page_observed(page.key)
             guard = getattr(device, '_task_flow_guard', None)
             if (not isolated
                     and guard is not None

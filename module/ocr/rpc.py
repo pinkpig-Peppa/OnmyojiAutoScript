@@ -8,7 +8,6 @@ import hashlib
 import json
 import multiprocessing
 import os
-import pickle
 import shutil
 import socket
 import tempfile
@@ -23,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import numpy as np
 import zerorpc
 
+from module.base.array_codec import decode_ndarray, encode_ndarray
 from module.exception import ScriptError
 from module.logger import logger
 from module.base.worker_metrics import WorkerMetrics, process_metrics
@@ -451,10 +451,7 @@ class OcrRuntime:
 
     @staticmethod
     def _decode_image(image_bytes: bytes) -> np.ndarray:
-        image = pickle.loads(image_bytes)
-        if not isinstance(image, np.ndarray):
-            raise TypeError("OCR payload must be numpy.ndarray")
-        return image
+        return decode_ndarray(image_bytes)
 
     @staticmethod
     def _rotate_vertical(image: np.ndarray) -> np.ndarray:
@@ -578,11 +575,16 @@ def ensure_ocr_server_started() -> bool:
     if not deploy_config.StartOcrServer:
         return False
 
-    if deploy_config.OcrServerPort:
-        port = int(deploy_config.OcrServerPort)
-    else:
-        _, port = _split_host_port(str(deploy_config.OcrClientAddress))
-    host = "0.0.0.0"
+    client_host, client_port = _split_host_port(
+        str(deploy_config.OcrClientAddress or "127.0.0.1:22268")
+    )
+    port = int(deploy_config.OcrServerPort) if deploy_config.OcrServerPort else client_port
+    configured_host = getattr(deploy_config, "OcrServerHost", None)
+    host = (
+        str(configured_host).strip()
+        if configured_host
+        else ("127.0.0.1" if client_host in ("127.0.0.1", "localhost", "::1", "") else "0.0.0.0")
+    )
 
     if _is_port_in_use("127.0.0.1", port):
         logger.info(f"OCR server already running on port {port}")
@@ -789,7 +791,7 @@ class ModelProxy:
         return bool(self._call_with_timeout_retry('warmup', self.model_size))
 
     def ocr_single_line(self, image: np.ndarray):
-        payload = pickle.dumps(image, protocol=4)
+        payload = encode_ndarray(image)
         cache_enabled = self._cache_enabled()
         cache_key = None
         if cache_enabled:
@@ -815,7 +817,7 @@ class ModelProxy:
         box_thresh: Optional[float] = None,
         vertical: bool = False,
     ):
-        payload = pickle.dumps(image, protocol=4)
+        payload = encode_ndarray(image)
         cache_enabled = self._cache_enabled()
         cache_key = None
         if cache_enabled:

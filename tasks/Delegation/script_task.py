@@ -5,7 +5,7 @@ from time import sleep
 from datetime import time, datetime, timedelta
 
 from module.logger import logger
-from module.exception import TaskEnd
+from module.exception import TaskEnd, TaskRecoveryFailed
 from module.base.timer import Timer
 
 from tasks.GameUi.game_ui import GameUi
@@ -44,10 +44,13 @@ class ScriptTask(GameUi, DelegationAssets):
         :return:
         """
         def ui_click(click, stop):
+            click_timer = Timer(self._perf_timeout(20)).start()
             while 1:
                 self.screenshot()
                 if self.appear(stop):
                     break
+                if click_timer.reached():
+                    raise TaskRecoveryFailed(f'Delegation select {getattr(stop, "name", stop)} timeout')
                 if self.click(click, interval=1.5):
                     continue
         logger.hr('Delegation one', 2)

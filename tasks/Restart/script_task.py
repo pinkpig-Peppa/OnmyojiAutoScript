@@ -42,6 +42,7 @@ class ScriptTask(LoginHandler):
             self._desktop_start_and_login()
             return
         self.device.app_start()
+        self.device.wait_app_start_ready()
         self.app_handle_login()
         # self.ensure_no_unfinished_campaign()
 
@@ -58,6 +59,7 @@ class ScriptTask(LoginHandler):
         else:
             self.device.app_stop()
             self.device.app_start()
+            self.device.wait_app_start_ready()
             self.app_handle_login()
 
         # self.config.task_delay(server_update=True)

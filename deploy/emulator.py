@@ -252,13 +252,19 @@ class EmulatorConnect:
     def _execute(self, cmd, timeout=10, output=True):
         """
         Returns:
-            Object: Stdout(str) of cmd if output,
+            Object: Stdout(bytes) of cmd if output,
                     return code(int) of cmd if not output.
         """
-        if not output:
-            cmd.extend(['>nul', '2>nul'])
-        logger.info(' '.join(cmd))
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+        argv = [str(part) for part in cmd]
+        logger.info(' '.join(argv))
+        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        process = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE if output else subprocess.DEVNULL,
+            stderr=subprocess.PIPE if output else subprocess.DEVNULL,
+            shell=False,
+            creationflags=creationflags,
+        )
         try:
             stdout, stderr = process.communicate(timeout=timeout)
             ret_code = process.returncode

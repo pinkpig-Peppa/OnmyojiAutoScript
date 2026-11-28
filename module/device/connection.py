@@ -141,7 +141,8 @@ class Connection(ConnectionAttr):
         # To disable it, edit gooey/gui/util/taskkill.py
 
         # No gooey anymore, just shell=False
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=False)
+        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=False, creationflags=creationflags)
         try:
             stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:

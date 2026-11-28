@@ -202,23 +202,26 @@ class Window(Handle):
         logger.info(f"Mumu emulator head height: {height}")
         return height
 
-    def click_window_message(self, x: int, y: int, fast: bool = False):
+    def click_window_message(self, x: int, y: int, fast: bool = False, duration: float | None = None):
         """
 
         :param x:
         :param y:
         :param fast:
+        :param duration:
         :return:
         """
         if getattr(self, 'is_desktop_window', False):
-            return self.click_desktop_window_message(x, y, fast)
+            return self.click_desktop_window_message(x, y, fast=fast, duration=duration)
         # 我不知道为什么的使用的pywin32==306的版本会导致获取的图片的是(1024, 576)
         # 所有我在点击的时候会除以这个缩放比例
         # 但是后面发现又不是影响的很奇怪
 
         x = int(x / self.window_scale_rate)
         y = int(y / self.window_scale_rate)
-        if fast:
+        if duration is not None:
+            press_time = duration
+        elif fast:
             press_time: float = (random.randint(10, 40)) / 1000.0
         else:
             press_time: float = (random.randint(100, 200)) / 1000.0
@@ -229,20 +232,55 @@ class Window(Handle):
             # SendMessage(self.control_handle_list[0], WM_LBUTTONDOWN, 0, MAKELONG(x, y+self.mumu_head_height))  # 模拟鼠标按下 先是父窗口 上面的框高度是57
             # mumu12模拟器 V3.5.16 之后后可以用下面的方式
             SendMessage(self.control_handle_list[1], WM_LBUTTONDOWN, 0, MAKELONG(x, y))
-            time.sleep(press_time)
-            SendMessage(self.control_handle_list[1], WM_LBUTTONUP, 0, MAKELONG(x, y))  # 模拟鼠标弹起 后是子窗口
+            try:
+                time.sleep(press_time)
+            finally:
+                SendMessage(self.control_handle_list[1], WM_LBUTTONUP, 0, MAKELONG(x, y))  # 模拟鼠标弹起 后是子窗口
         elif emulator_type > 2:  # 夜神模拟器
             SendMessage(self.control_handle_list[0], WM_LBUTTONDOWN, 0, MAKELONG(x, y))  # 模拟鼠标按下 先是父窗口 上面的框高度是57
             SendMessage(self.control_handle_list[1], WM_LBUTTONDOWN, 0, MAKELONG(x, y))
             SendMessage(self.control_handle_list[2], WM_LBUTTONDOWN, 0, MAKELONG(x, y))
             SendMessage(self.control_handle_list[3], WM_LBUTTONDOWN, 0, MAKELONG(x, y))
-            time.sleep(press_time)
-            SendMessage(self.control_handle_list[3], WM_LBUTTONUP, 0, MAKELONG(x, y))  # 模拟鼠标弹起 后是子窗口
+            try:
+                time.sleep(press_time)
+            finally:
+                SendMessage(self.control_handle_list[3], WM_LBUTTONUP, 0, MAKELONG(x, y))  # 模拟鼠标弹起 后是子窗口
         elif emulator_type == 1:  # 雷电模拟器
             clickPos = MAKELONG(x, y)
             SendMessage(self.control_handle_list[0], WM_LBUTTONDOWN, 0, clickPos)
-            time.sleep(press_time)
-            SendMessage(self.control_handle_list[0], WM_LBUTTONUP, 0, clickPos)
+            try:
+                time.sleep(press_time)
+            finally:
+                SendMessage(self.control_handle_list[0], WM_LBUTTONUP, 0, clickPos)
+
+    def hover_window_message(self, path):
+        """Deliver a hover-only path before a click without creating a swipe."""
+        if getattr(self, 'is_desktop_window', False):
+            self.desktop_window_restore_if_minimized()
+            hwnd = self.root_handle_num
+            last_target = None
+            for (x, y), delay in path:
+                px, py = int(round(x)), int(round(y))
+                PostMessage(hwnd, WM_MOUSEMOVE, 0, MAKELONG(*self.desktop_message_coord(px, py)))
+                last_target = (px, py)
+                time.sleep(delay)
+            if last_target is not None:
+                self._desktop_cursor = last_target
+            return
+        emulator_type = len(self.control_handle_list)
+        if emulator_type == 2:
+            handle = self.control_handle_list[1]
+        elif emulator_type > 2:
+            handle = self.control_handle_list[3]
+        elif emulator_type == 1:
+            handle = self.control_handle_list[0]
+        else:
+            return
+        for (x, y), delay in path:
+            sx = int(x / self.window_scale_rate)
+            sy = int(y / self.window_scale_rate)
+            SendMessage(handle, WM_MOUSEMOVE, 0, MAKELONG(sx, sy))
+            time.sleep(delay)
 
     def desktop_message_coord(self, x, y) -> tuple:
         """把资产坐标（截图空间 1280x720）换算成窗口消息坐标。
@@ -265,17 +303,19 @@ class Window(Handle):
         self.move_desktop_window_message(x, y)
         lparam = MAKELONG(*self.desktop_message_coord(x, y))
         PostMessage(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
-        time.sleep(press_time)
-        PostMessage(hwnd, WM_LBUTTONUP, 0, lparam)
-        SendMessage(hwnd, WM_CAPTURECHANGED, 0, 0)
-        PostMessage(hwnd, WM_MOUSEMOVE, 0, lparam)
+        try:
+            time.sleep(press_time)
+        finally:
+            PostMessage(hwnd, WM_LBUTTONUP, 0, lparam)
+            SendMessage(hwnd, WM_CAPTURECHANGED, 0, 0)
+            PostMessage(hwnd, WM_MOUSEMOVE, 0, lparam)
 
-    def click_desktop_window_message(self, x: int, y: int, fast: bool = False):
-        """桌面客户端后台点击，入参为客户区（1280x720）坐标。
-
-        按压时长只保留随机抖动：点击由客户端按 down/up 事件判定，不需要真人按压。
-        """
-        press_time: float = (random.randint(10, 25) if fast else random.randint(30, 60)) / 1000.0
+    def click_desktop_window_message(self, x: int, y: int, fast: bool = False, duration: float | None = None):
+        """桌面客户端后台点击，入参为客户区（1280x720）坐标。"""
+        if duration is not None:
+            press_time = duration
+        else:
+            press_time = (random.randint(10, 25) if fast else random.randint(30, 60)) / 1000.0
         self._desktop_press(x, y, press_time)
 
     def long_click_desktop_window_message(self, x: int, y: int, duration: float):
