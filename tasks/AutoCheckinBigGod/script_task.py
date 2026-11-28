@@ -364,7 +364,7 @@ class ScriptTask(BaseTask):
             # 先删除旧文件（如果存在）
             try:
                 self._adb_shell(['rm', '-f', FRIDA_SERVER_REMOTE])
-            except:
+            except Exception:
                 pass
 
             # 推送文件
@@ -386,7 +386,7 @@ class ScriptTask(BaseTask):
                     if remote_size != local_size:
                         logger.error(f'推送失败: 文件大小不匹配 (本地: {local_size}, 远程: {remote_size})')
                         return False
-            except:
+            except (ValueError, IndexError):
                 pass
 
             self._adb_shell(['chmod', '755', FRIDA_SERVER_REMOTE])
@@ -641,7 +641,7 @@ class ScriptTask(BaseTask):
         finally:
             try:
                 os.unlink(script_path)
-            except:
+            except OSError:
                 pass
 
     def _try_extract_token(self, pid):

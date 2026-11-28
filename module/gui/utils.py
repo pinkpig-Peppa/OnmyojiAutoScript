@@ -24,7 +24,7 @@ def is_admin():
     try:
         result = ctypes.windll.shell32.IsUserAnAdmin()
         return result == 1
-    except:
+    except Exception:
         return False
 
 def check_admin():

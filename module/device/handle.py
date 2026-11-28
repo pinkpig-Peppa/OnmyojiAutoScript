@@ -393,7 +393,7 @@ class Handle(DesktopWindow):
         elif self.emulator_family == EmulatorFamily.FAMILY_NOX:
             try:
                 return self.root_node.children[1].children[1].num
-            except:
+            except IndexError:
                 return self.root_node.children[2].children[1].num
 
         elif self.emulator_family == EmulatorFamily.FAMILY_LD:
