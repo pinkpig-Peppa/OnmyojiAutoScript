@@ -593,8 +593,102 @@ class Script:
                     gate.defer(gate.task, retry_at)
             elif gate.task == command:
                 gate.defer(command, retry_at)
+        self._remember_failed_stage(command)
         logger.warning(f'Task `{command}` failed; retry at {retry_at} using scheduler.failure_interval')
         return retry_at
+
+    def _remember_failed_stage(self, command: str) -> None:
+        if command in ('Restart', 'GotoMain'):
+            return
+        profile = getattr(self, 'config_name', None)
+        device = self.__dict__.get('device')
+        config = self.__dict__.get('config')
+        if not isinstance(profile, str) or not profile or device is None:
+            return
+        try:
+            from module.script.failed_task_recovery import remember
+            remember(config, device, profile, command)
+        except Exception as error:
+            logger.warning(f'Cannot save failed-page identity: {error}')
+
+    def _bounded_home_retry_at(self, retry_at: datetime) -> datetime:
+        maximum_wait = datetime.now().replace(microsecond=0) + timedelta(minutes=5)
+        if retry_at > maximum_wait:
+            self._clear_recovery_failure('GotoMain')
+            deadlines = getattr(self, '_task_failure_deadlines', None)
+            if deadlines is None:
+                deadlines = self._task_failure_deadlines = {}
+            deadlines['GotoMain'] = maximum_wait
+            gate = getattr(self, 'completion_gate', None)
+            if gate is not None:
+                gate.defer_recovery('GotoMain', maximum_wait)
+            logger.warning('Legacy home recovery wait shortened to five minutes; other task retries unchanged')
+            return maximum_wait
+        return retry_at
+
+    def _record_task_failure_strike(self, task: str, success: bool) -> bool:
+        """Return True if task reached 3 consecutive failures and escalated to takeover."""
+        failed = 0 if success else self.failure_record.get(task, 0) + 1
+        self.failure_record[task] = failed
+        if failed < 3:
+            return False
+        logger.critical(f"Task `{task}` failed 3 or more times.")
+        logger.critical("Possible reason #1: You haven't used it correctly. "
+                        "Please read the help text of the options.")
+        logger.critical("Possible reason #2: There is a problem with this task. "
+                        "Please contact developers or try to fix it yourself.")
+        logger.critical('Request human takeover')
+        self.config.notifier.push(
+            title=f'{I18n.trans_zh_cn(task)}{task}',
+            content=f"<{self.config_name}> 任务连续失败三次，请上线查看"
+        )
+        if self.config.script.error.error_repeated:
+            self.device.emulator_stop()
+        state_queue = getattr(self, 'state_queue', None)
+        if state_queue is not None:
+            state_queue.put({"state": 2})
+        return True
+
+    def _ensure_failed_task_switch_ready(self, command: str) -> tuple[bool, bool]:
+        """Verify home before switching away from a failed business task.
+
+        Returns:
+            (ready_to_run, fatal_stop)
+        """
+        profile = getattr(self, 'config_name', None)
+        if not isinstance(profile, str) or not profile or command in ('Restart', 'GotoMain'):
+            return True, False
+        from module.script.failed_task_recovery import prepare_switch, read_switch, write_switch
+        state = read_switch(profile)
+        if not state or state['task'] == command:
+            return True, False
+        retry_iso = state.get('not_before')
+        if state.get('policy') == 2 and retry_iso is not None:
+            parsed = datetime.fromisoformat(retry_iso)
+            if datetime.now() < parsed:
+                retry_time = self._bounded_home_retry_at(parsed)
+                if retry_time != parsed:
+                    state['not_before'] = retry_time.isoformat()
+                    write_switch(profile, state)
+                self.wait_until(retry_time)
+                return False, False
+        try:
+            if prepare_switch(self.config, self.device, profile) is not True:
+                raise RuntimeError('Task switch home was not verified')
+        except Exception as error:
+            logger.warning(f'Keep task `{command}` queued: cannot leave failed task `{state["task"]}` via main: {error}')
+            retry_at = self._defer_failed_task('GotoMain')
+            if retry_at is not None:
+                write_switch(profile, {'task': state['task'], 'not_before': retry_at.isoformat(), 'policy': 2})
+            if self._record_task_failure_strike('GotoMain', False):
+                return False, True
+            if retry_at is not None:
+                self.wait_until(retry_at)
+            return False, False
+        self._clear_recovery_failure('GotoMain')
+        self._record_task_failure_strike('GotoMain', True)
+        logger.info(f'Verified main before switching from failed `{state["task"]}` to `{command}`')
+        return True, False
 
     def _clear_recovery_failure(self, command: str) -> None:
         if command not in ('Restart', 'GotoMain'):
@@ -631,6 +725,8 @@ class Script:
             reset_recovery = getattr(self.device, 'reset_task_recovery', None)
             if callable(reset_recovery):
                 reset_recovery()
+            self.device._failed_original_page = None
+            self.device._failed_original_page_captured = False
             try:
                 self.device.screenshot()
             except GameNotRunningError:
@@ -639,15 +735,24 @@ class Script:
                 if command != 'Restart':
                     raise
                 logger.info('Client window gone, skip pre-screenshot and let Restart recover it')
+            if command not in ('Restart', 'GotoMain') and getattr(self, 'config_name', None):
+                from module.script.failed_task_recovery import clear, prepare
+                route = prepare(self.config, self.device, self.config_name, command)
+                clear(self.config_name, command)
+                logger.info(f'Failed-stage entry for {command}: {route}')
             module_name = 'script_task'
             module_path = str(Path.cwd() / 'tasks' / command / (module_name+'.py'))
             logger.info(f'module_path: {module_path}, module_name: {module_name}')
             task_module = load_module(module_name, module_path)
             task_instance = task_module.ScriptTask(config=self.config, device=self.device)
+            task_instance._seen_escape_generation = getattr(self.device, '_escape_generation', 0)
             with TaskFlowGuard(task_instance, self.device, command=command):
                 task_instance.run()
         except TaskEnd:
             self._clear_recovery_failure(command)
+            if command not in ('Restart', 'GotoMain') and getattr(self, 'config_name', None):
+                from module.script.failed_task_recovery import clear
+                clear(self.config_name, command)
             gate = getattr(self, 'completion_gate', None)
             if gate is not None and command not in ('Restart', 'GotoMain'):
                 gate.release(command)
@@ -728,6 +833,9 @@ class Script:
             self._defer_failed_task(command)
             return False
         self._clear_recovery_failure(command)
+        if command not in ('Restart', 'GotoMain') and getattr(self, 'config_name', None):
+            from module.script.failed_task_recovery import clear
+            clear(self.config_name, command)
         gate = getattr(self, 'completion_gate', None)
         if gate is not None and command not in ('Restart', 'GotoMain'):
             gate.release(command)
@@ -817,43 +925,28 @@ class Script:
                 self.is_first_task = False
 
             # Run
+            camel_task = inflection.camelize(task)
+            ready, fatal_stop = self._ensure_failed_task_switch_ready(camel_task)
+            if fatal_stop:
+                return
+            if not ready:
+                del_cached_property(self, 'config')
+                continue
+
             logger.info(f'Scheduler: Start task `{task}`')
             self.device.stuck_record_clear()
             self.device.click_record_clear()
             logger.hr(task, level=0)
             self.config.model.running_task = task
             _task_start = datetime.now()
-            success = self.run(inflection.camelize(task))
+            success = self.run(camel_task)
             self.config.model.running_task = ''
             logger.info(f'Scheduler: End task `{task}`')
             self.is_first_task = False
             self.anti_ban_guard.record_active((datetime.now() - _task_start).total_seconds())
 
             # Check failures
-            # failed = deep_get(self.failure_record, keys=task, default=0)
-            failed = self.failure_record[task] if task in self.failure_record else 0
-            failed = 0 if success else failed + 1
-            # deep_set(self.failure_record, keys=task, value=failed)
-            self.failure_record[task] = failed
-            if failed >= 3:
-                logger.critical(f"Task `{task}` failed 3 or more times.")
-                logger.critical("Possible reason #1: You haven't used it correctly. "
-                                "Please read the help text of the options.")
-                logger.critical("Possible reason #2: There is a problem with this task. "
-                                "Please contact developers or try to fix it yourself.")
-                logger.critical('Request human takeover')
-                # 添加失败三次的推送通知
-                self.config.notifier.push(
-                    title=f'{I18n.trans_zh_cn(task)}{task}',
-                    content=f"<{self.config_name}> 任务连续失败三次，请上线查看"
-                )
-                # 关闭模拟器
-                if self.config.script.error.error_repeated:
-                    self.device.emulator_stop()
-                # G13: 不再直接 exit(1) 静默杀进程，改为上报状态并受控返回
-                state_queue = getattr(self, 'state_queue', None)
-                if state_queue is not None:
-                    state_queue.put({"state": 2})
+            if self._record_task_failure_strike(task, success):
                 return
 
             if success:

@@ -212,6 +212,14 @@ class BaseTask(GlobalGameAssets, CostumeBase):
         :return:
         """
         self.device.screenshot()
+        from module.device.escape_popup import game_exit_cancel_point
+        from tasks.Component.escape_recovery import handle_escape_recovery
+        cancel_point = game_exit_cancel_point(self.device.image)
+        if cancel_point is not None:
+            logger.warning('Cancel exit-game dialog before task page matching')
+            self.device.click(*cancel_point, control_check=False, control_name='EXIT_GAME_CANCEL')
+            self.device.screenshot()
+        handle_escape_recovery(self)
         # 判断勾协
         self._burst()
 

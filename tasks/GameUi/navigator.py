@@ -349,8 +349,11 @@ class GameUi(BaseTask, GameUiAssets):
         """
 
         self._check_navigation_budget()
+        recovery_generation = getattr(self.device, "_escape_generation", 0)
         self.maybe_screenshot(skip_first_screenshot)
         self._check_navigation_budget()
+        if recovery_generation != getattr(self.device, "_escape_generation", 0):
+            return False
 
         if isinstance(action, ConditionalAction):
             if not action.condition.evaluate(self):
@@ -418,6 +421,46 @@ class GameUi(BaseTask, GameUiAssets):
         """
 
         self.navigator.last_enter_success_page_key = page.key
+
+    @staticmethod
+    def _is_navigation_back_action(action) -> bool:
+        """判断导航动作是否包含已知的返回或关闭按钮。"""
+        if isinstance(action, ConditionalAction):
+            return GameUi._is_navigation_back_action(action.action)
+        if isinstance(action, ActionSequence):
+            return any(GameUi._is_navigation_back_action(item) for item in action.actions)
+        if isinstance(action, (list, tuple)):
+            return any(GameUi._is_navigation_back_action(item) for item in action)
+        return any(action is button for button in (
+            GlobalGameAssets.I_UI_BACK_YELLOW,
+            GlobalGameAssets.I_UI_BACK_CIRCLE,
+            GlobalGameAssets.I_UI_BACK_BLUE,
+            GlobalGameAssets.I_UI_BACK_RED,
+            GameUiAssets.I_BACK_DAILY,
+        ))
+
+    def _handle_navigation_exit_confirmation(self) -> bool:
+        """在返回流程中处理两帧稳定出现的确认按钮。"""
+        self._check_navigation_budget()
+        recovery_generation = getattr(self.device, "_escape_generation", 0)
+        for button in (
+            GlobalGameAssets.I_UI_CONFIRM_SAMLL,
+            GlobalGameAssets.I_UI_CONFIRM,
+            ExplorationAssets.I_E_EXIT_CONFIRM,
+        ):
+            self._check_navigation_budget()
+            if not self.appear(button):
+                continue
+            self.screenshot()
+            self._check_navigation_budget()
+            if recovery_generation != getattr(self.device, "_escape_generation", 0):
+                return True
+            if not self.appear(button):
+                return True
+            if self.click(button, interval=1.5):
+                logger.info(f"Navigation exit confirmed: {button.name}")
+            return True
+        return False
 
     def _run_enter_success_hooks_if_needed(self, page: Page) -> None:
         """仅在页面变化时触发进入成功 hook。
@@ -787,6 +830,30 @@ class GameUi(BaseTask, GameUiAssets):
         if self.device.app_lost_login():
             raise GameNotRunningError('Client dropped back to login')
 
+        # 仅在完全未识别的页面走顶部返回/关闭图标或有界 ESC 恢复；
+        # 已注册但跳转失败的页面继续保留局部 closer 与任务弹窗处理。
+        if (hasattr(self.device, "recover_by_escape")
+                and self.get_current_page(skip_first_screenshot=True, fallback=True) is None):
+            from tasks.GameUi.recovery_exit import click_exit, exit_point
+            self._check_navigation_budget(recovery=True)
+            logger.warning("Unrecognized page: exit current screen directly")
+            if exit_point(self.device.image) is not None:
+                changed = click_exit(self)
+                self._check_navigation_budget()
+                self._record_unknown_close_event("recognized_exit" if changed else "exit_unchanged")
+                if changed:
+                    self.navigator.current_page = None
+                    self._handle_navigation_exit_confirmation()
+                return changed
+            self.device.recover_by_escape("Unrecognized page: exit current screen")
+            self.screenshot()
+            self._check_navigation_budget()
+            self._handle_navigation_exit_confirmation()
+            self._check_navigation_budget()
+            self.navigator.current_page = None
+            self._record_unknown_close_event("BACK")
+            return True
+
         logger.warning("Try switch to a supported page")
         for action in [*self.navigator.local_unknown_closers, *self.DEFAULT_UNKNOWN_CLOSERS]:
             self._check_navigation_budget()
@@ -800,6 +867,10 @@ class GameUi(BaseTask, GameUiAssets):
                 self._record_unknown_close_event(f"{action_name}")
                 # 关掉未知界面后等待页面变化, 防止多次识别到未知界面
                 self._navigation_sleep(random.randrange(8, 16, 1) / 10)
+                if self._is_navigation_back_action(action):
+                    self.screenshot()
+                    self._check_navigation_budget()
+                    self._handle_navigation_exit_confirmation()
                 return True
         self._record_unknown_close_event(f"None")
 
@@ -841,7 +912,8 @@ class GameUi(BaseTask, GameUiAssets):
 
     def goto_page(self, destination: Page, confirm_wait: float = 0, skip_first_screenshot: bool = True,
                   timeout: int = 30, *, accepted_pages: tuple[Page, ...] = (),
-                  max_steps: int | None = None, total_timeout: float | None = None) -> bool | None:
+                  max_steps: int | None = None, total_timeout: float | None = None,
+                  recovery_navigation: bool = False) -> bool | None:
         """导航到目标页面。
 
         Args:
@@ -852,6 +924,7 @@ class GameUi(BaseTask, GameUiAssets):
             accepted_pages: 可直接继续任务的其他页面，识别到后无需转往目标页。
             max_steps: 默认64步，累计外层轮次与导航边执行次数，不因进展或恢复重置。
             total_timeout: 默认180秒，包含未知页关闭与到达等待；每次调用还限制2次恢复和256次内部轮询。
+            recovery_navigation: 仅独立返回导航使用；未知新帧交还有界导航循环，禁止旧业务栈恢复。
 
         Returns:
             是否成功到达目标页面。
@@ -871,6 +944,8 @@ class GameUi(BaseTask, GameUiAssets):
         budget = _NavigationBudget(destination, max_steps, total_timeout)
         previous = getattr(self, "_navigation_budgets", ())
         self._navigation_budgets = (*previous, budget)
+        previous_recovery = getattr(self, "_isolated_recovery_navigation", False)
+        self._isolated_recovery_navigation = previous_recovery or recovery_navigation
         try:
             self._check_navigation_budget()
             while True:
@@ -884,10 +959,18 @@ class GameUi(BaseTask, GameUiAssets):
                 except ClickResponseUnchanged as error:
                     self._check_navigation_budget(recovery=True)
                     logger.warning(f"Navigation click fenced; recovering under shared budget: {error}")
+                    recover_escape = getattr(self.device, "recover_by_escape", None)
+                    if callable(recover_escape):
+                        recover_escape("Navigation click response unchanged")
+                        self.screenshot()
+                        self._check_navigation_budget()
+                        self._handle_navigation_exit_confirmation()
+                    else:
+                        self.close_unknown_pages(skip_first_screenshot=False)
                     self.navigator.current_page = None
-                    self.close_unknown_pages(skip_first_screenshot=False)
                     skip_first_screenshot = False
         finally:
+            self._isolated_recovery_navigation = previous_recovery
             if previous:
                 self._navigation_budgets = previous
             else:
@@ -904,6 +987,7 @@ class GameUi(BaseTask, GameUiAssets):
         # 进入清理 hook，否则第二次 goto 同一页面时页面弹窗不会被处理。
         self.navigator.last_enter_success_page_key = None
         progress_timer = Timer(timeout).start()
+        recovery_generation = getattr(self.device, "_escape_generation", 0)
         # progress_timer 会被“页面变化 / 路径变化 / 关弹窗成功 / 单边成功”反复重置，
         # 页面来回震荡（每步都成功但到不了目标）时永远不会超时。
         # 这里再维护一个不会重置的硬上限，保证 goto_page 一定能退出。
@@ -936,6 +1020,12 @@ class GameUi(BaseTask, GameUiAssets):
             current = self._refresh_current_page(destination, skip_first_screenshot)
             self._check_navigation_budget()
             skip_first_screenshot = False
+            if recovery_generation != getattr(self.device, "_escape_generation", 0):
+                recovery_generation = getattr(self.device, "_escape_generation", 0)
+                progress_timer.reset()
+                last_progress_signature = None
+                last_detected_page_key = None
+                reset_repeated_transition_failures()
 
             if current is None:
                 if self.close_unknown_pages(skip_first_screenshot=False):
