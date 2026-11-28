@@ -9,16 +9,34 @@ from pathlib import Path
 
 from module.atom.RuleImageMallResourceMixin import RuleImageMallResourceMixin
 from module.base.decorator import cached_property, del_cached_property
+from module.image.scales import MAX_MULTI_SCALE_SAMPLES, multi_scale_values, normalize_multi_scale_range
 from module.logger import logger
 from module.base.utils import expand_roi, is_approx_rectangle
 from module.base.utils.utils import random_normal_distribution_int
 
-# 模板匹配搜索区域统一外扩的像素数。
+# 模板匹配搜索区域默认外扩像素数；可通过 set_roi_match_padding 在测试或局部场景调整。
 ROI_BACK_EXPAND = 2
+_ROI_MATCH_PADDING = ROI_BACK_EXPAND
+
+
+def set_roi_match_padding(padding: int) -> None:
+    """设置模板匹配搜索区域外扩像素数（0 表示严格使用原始 roi_back）。"""
+    global _ROI_MATCH_PADDING
+    _ROI_MATCH_PADDING = max(0, int(padding))
+
+
+def get_roi_match_padding() -> int:
+    return _ROI_MATCH_PADDING
 
 
 class RuleImage(RuleImageMallResourceMixin):
     debug_mode: bool = False
+    METHOD_TEMPLATE_MATCH = "Template matching"
+    METHOD_MASKED_TEMPLATE_MATCH = "Masked template matching"
+    METHOD_MULTI_SCALE_TEMPLATE_MATCH = "Multi-scale template matching"
+    METHOD_SIFT_FLANN = "Sift Flann"
+    DEFAULT_MULTI_SCALE_RANGE = (0.6, 1.2)
+    DEFAULT_MULTI_SCALE_STEP = 0.1
 
     def __init__(self, roi_front: tuple, roi_back: tuple, method: str, threshold: float, file: str) -> None:
         """
@@ -40,11 +58,11 @@ class RuleImage(RuleImageMallResourceMixin):
         self.method = method
 
         self.roi_front: list = list(roi_front)
-        # 性能评估：四个 GameUi 庭院规则单轮总匹配耗时增加 1.23%（10.027ms -> 10.151ms）。
-        # TODO: assets 生命周期改为 Device 初始化后创建时，按运行环境初始化 roi_back，并删除这里的统一扩展。
-        self.roi_back = expand_roi(roi_back, ROI_BACK_EXPAND)
+        self.roi_back = roi_back
         self.threshold = threshold
         self.file = file
+        self.scale_range: tuple[float, float] | tuple[float, float, float] | None = None
+        self.scale_step: float = self.DEFAULT_MULTI_SCALE_STEP
 
 
 
@@ -105,29 +123,29 @@ class RuleImage(RuleImageMallResourceMixin):
             self.load_image()
         return self._image
 
-    @cached_property
+    @property
     def is_template_match(self) -> bool:
         """
         是否是模板匹配
         :return:
         """
-        return self.method == "Template matching"
+        return self.method == self.METHOD_TEMPLATE_MATCH
 
-    @cached_property
+    @property
     def is_masked_template_match(self) -> bool:
         """
         是否是掩码模板匹配，掩码取自同目录下 `xxx_mask.png`
         :return:
         """
-        return self.method == "Masked template matching"
+        return self.method == self.METHOD_MASKED_TEMPLATE_MATCH
 
-    @cached_property
+    @property
     def is_multi_scale_template_match(self) -> bool:
-        return self.method == "Multi-scale template matching"
+        return self.method == self.METHOD_MULTI_SCALE_TEMPLATE_MATCH
 
-    @cached_property
+    @property
     def is_sift_flann(self) -> bool:
-        return self.method == "Sift Flann"
+        return self.method == self.METHOD_SIFT_FLANN
 
     @cached_property
     def sift(self):
@@ -218,6 +236,12 @@ class RuleImage(RuleImageMallResourceMixin):
             del_cached_property(self, cached_name)
 
 
+    def _effective_roi(self, roi: list | tuple | None = None) -> list[int]:
+        base = self.roi_back if roi is None else roi
+        if _ROI_MATCH_PADDING > 0:
+            return expand_roi(base, _ROI_MATCH_PADDING)
+        return [int(v) for v in base]
+
     def corp(self, image: np.array, roi: list = None) -> np.array:
         """
         截取图片
@@ -225,8 +249,17 @@ class RuleImage(RuleImageMallResourceMixin):
         :param roi
         :return:
         """
-        x, y, w, h = self.roi_back if roi is None else roi
+        x, y, w, h = self._effective_roi(roi)
         return image[y:y + h, x:x + w]
+
+    def _get_multi_scale_range(self, scale_range: tuple | None = None) -> tuple[float, float, float]:
+        active_range = scale_range if scale_range is not None else self.scale_range
+        return normalize_multi_scale_range(
+            active_range,
+            self.scale_step,
+            default_range=self.DEFAULT_MULTI_SCALE_RANGE,
+            default_step=self.DEFAULT_MULTI_SCALE_STEP,
+        )
 
     def match(self, image: np.array, threshold: float = None) -> bool:
         """
@@ -238,13 +271,14 @@ class RuleImage(RuleImageMallResourceMixin):
             threshold = self.threshold
 
         if self.is_multi_scale_template_match:
-            return self.match_multi_scale(image, threshold, scale_range=(0.6, 1.2))
+            return self.match_multi_scale(image, threshold)
 
         if not (self.is_template_match or self.is_masked_template_match):
             return self.sift_match(image)
-            # raise Exception(f"unknown method {self.method}")
 
-        source = self.corp(image)
+        search_roi = self._effective_roi()
+        x0, y0, w, h = search_roi
+        source = image[y0:y0 + h, x0:x0 + w]
         mat = self.image
 
         if mat is None or mat.shape[0] == 0 or mat.shape[1] == 0:
@@ -266,11 +300,11 @@ class RuleImage(RuleImageMallResourceMixin):
         res = self._sanitize_match_result(res)
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)  # 最小匹配度，最大匹配度，最小匹配度的坐标，最大匹配度的坐标
         self.last_score = float(max_val)
+        self.last_scale = None
         if self.debug_mode:
             logger.attr(self.name, f'matching score {max_val:.5f}')
 
         if max_val > threshold:
-            x0, y0 = self.roi_back[:2]
             self.roi_front[0] = max_loc[0] + x0
             self.roi_front[1] = max_loc[1] + y0
             return True
@@ -280,80 +314,86 @@ class RuleImage(RuleImageMallResourceMixin):
     def match_multi_scale(self, image: np.array, threshold: float = None,
                           scales: list = None, scale_range: tuple = None) -> bool:
         """
-        多尺度模板匹配，自动尝试多个缩放比例以适应图片大小的变化
+        多尺度模板匹配，使用有界网格枚举（上限 2048 采样点）防止异常步长阻塞或爆内存。
         :param image: 原始截图
         :param threshold: 匹配阈值
-        :param scales: 缩放比例列表
-        :param scale_range: 缩放范围 (start, end, step)，例如 (0.8, 1.2, 0.1)，step 默认为 0.1
+        :param scales: 显式缩放比例列表
+        :param scale_range: 缩放范围 (start, end) 或 (start, end, step)
         :return: 匹配是否成功
         """
+        from math import isfinite
         if threshold is None:
             threshold = self.threshold
 
-        # 如果指定了 scale_range，自动生成 scales 列表
-        if scale_range is not None:
-            start, end = scale_range[:2]
-            step = scale_range[2] if len(scale_range) > 2 else 0.1
-            scales = sorted(set(round(x, 1) for x in np.arange(start, end + step, step)))
-
-        if scales is None:
-            scales = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2]
+        if scales is not None:
+            parsed_scales = [float(x) for x in scales]
+            if not parsed_scales:
+                return False
+            if not all(isfinite(x) and x > 0 for x in parsed_scales):
+                raise ValueError('Multi-scale bounds and step must be finite and positive')
+            if len(parsed_scales) > MAX_MULTI_SCALE_SAMPLES:
+                raise ValueError(f'Multi-scale search exceeds {MAX_MULTI_SCALE_SAMPLES} samples')
+            grid = tuple(parsed_scales)
         else:
-            scales = sorted(set(round(x, 1) for x in scales))
+            min_scale, max_scale, step = self._get_multi_scale_range(scale_range)
+            grid = multi_scale_values(min_scale, max_scale, step)
 
-        source = self.corp(image)
+        search_roi = self._effective_roi()
+        x0, y0, w, h = search_roi
+        source = image[y0:y0 + h, x0:x0 + w]
         mat = self.image
 
         if mat is None or mat.shape[0] == 0 or mat.shape[1] == 0:
             logger.error(f"Template image is invalid: {mat.shape}")
             return False
-        if self._template_is_degenerate(mat):
-            logger.error(f"{self.name} template is flat (no variance), treated as not matched")
-            return False
 
-        # 预计算模板尺寸
         mat_h, mat_w = mat.shape[:2]
         source_h, source_w = source.shape[:2]
 
-        best_score = 0
+        best_score = -1.0
         best_loc = None
         best_scale = 1.0
         best_shape = None  # 最佳得分对应的是哪一档缩放尺寸, 回写 roi_front 只能用它
         self.last_scale = None
 
-        for scale in scales:
-            scaled_w = int(mat_w * scale)
-            scaled_h = int(mat_h * scale)
+        degenerate_checked = False
+        for scale in grid:
+            scaled_w = max(1, int(mat_w * scale))
+            scaled_h = max(1, int(mat_h * scale))
 
-            # 跳过无效缩放
-            if scaled_w < 10 or scaled_h < 10:
-                continue
-            # 缩放后仍大于源图则跳过该尺度(避免 matchTemplate 契约问题)
+            # 缩放后仍大于源图则跳过该尺度(避免 matchTemplate 契约问题，且不执行无意义 resize)
             if scaled_w > source_w or scaled_h > source_h:
                 continue
 
-            try:
-                scaled_mat = cv2.resize(mat, (scaled_w, scaled_h))
-                res = cv2.matchTemplate(source, scaled_mat, cv2.TM_CCOEFF_NORMED)
-                res = self._sanitize_match_result(res)
-                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+            if not degenerate_checked:
+                degenerate_checked = True
+                if self._template_is_degenerate(mat):
+                    logger.error(f"{self.name} template is flat (no variance), treated as not matched")
+                    self.last_score = 0.0
+                    return False
 
-                if max_val > best_score:
-                    best_score = max_val
-                    best_loc = max_loc
-                    best_scale = scale
-                    best_shape = (scaled_w, scaled_h)
-            except Exception as e:
+            scaled_mat = cv2.resize(mat, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
+            if self._template_is_degenerate(scaled_mat):
                 continue
+            res = cv2.matchTemplate(source, scaled_mat, cv2.TM_CCOEFF_NORMED)
+            res = self._sanitize_match_result(res)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
 
+            if max_val > best_score:
+                best_score = max_val
+                best_loc = max_loc
+                best_scale = scale
+                best_shape = (scaled_w, scaled_h)
+
+        if best_score < 0:
+            best_score = 0.0
         if self.debug_mode:
             logger.attr(self.name, f'best scale: {best_scale:.2f}, best score: {best_score:.5f}')
         self.last_score = float(best_score)
         if best_loc is not None:
-            self.last_scale = float(best_scale)
+            self.last_scale = round(float(best_scale), 6)
 
         if best_score > threshold and best_loc is not None and best_shape is not None:
-            x0, y0 = self.roi_back[:2]
             self.roi_front[0] = best_loc[0] + x0
             self.roi_front[1] = best_loc[1] + y0
             self.roi_front[2] = best_shape[0]
@@ -361,6 +401,8 @@ class RuleImage(RuleImageMallResourceMixin):
             return True
         else:
             return False
+
+    multi_scale_template_match = match_multi_scale
 
     def match_all(self, image: np.array, threshold: float = None, roi: list = None) -> list[tuple]:
         """
@@ -371,12 +413,14 @@ class RuleImage(RuleImageMallResourceMixin):
         :return:
         """
         if roi is not None:
-            self.roi_back = expand_roi(roi, ROI_BACK_EXPAND)
+            self.roi_back = roi
         if threshold is None:
             threshold = self.threshold
         if not (self.is_template_match or self.is_masked_template_match):
             raise Exception(f"unknown method {self.method}")
-        source = self.corp(image)
+        search_roi = self._effective_roi()
+        x0, y0, w, h = search_roi
+        source = image[y0:y0 + h, x0:x0 + w]
         mat = self.image
         mask = self.mask if self.is_masked_template_match else None
         if self._template_is_degenerate(mat, mask):
@@ -391,7 +435,6 @@ class RuleImage(RuleImageMallResourceMixin):
             self.last_score = float(results.max())
         locations = np.where(results >= threshold)
         matches = []
-        x0, y0 = self.roi_back[:2]
         for pt in zip(*locations[::-1]):  # (x, y) coordinates
             score = results[pt[1], pt[0]]
             # 得分, x, y, w, h
@@ -409,12 +452,14 @@ class RuleImage(RuleImageMallResourceMixin):
         :return:
         """
         if roi is not None:
-            self.roi_back = expand_roi(roi, ROI_BACK_EXPAND)
+            self.roi_back = roi
         if threshold is None:
             threshold = self.threshold
         if not (self.is_template_match or self.is_masked_template_match):
             raise Exception(f"unknown method {self.method}")
-        source = self.corp(image)
+        search_roi = self._effective_roi()
+        x0, y0, w, h = search_roi
+        source = image[y0:y0 + h, x0:x0 + w]
         mat = self.image
         mask = self.mask if self.is_masked_template_match else None
         if self._template_is_degenerate(mat, mask):
@@ -429,7 +474,6 @@ class RuleImage(RuleImageMallResourceMixin):
             self.last_score = float(results.max())
         locations = np.where(results >= threshold)
         matches = []
-        x0, y0 = self.roi_back[:2]
         for pt in zip(*locations[::-1]):  # (x, y) coordinates
             score = results[pt[1], pt[0]]
             # 得分, x, y, w, h
@@ -517,7 +561,7 @@ class RuleImage(RuleImageMallResourceMixin):
                 result = False
             else:
                 dst = int32(cv2.perspectiveTransform(pts, m))
-                x0, y0 = self.roi_back[:2]
+                x0, y0 = self._effective_roi()[:2]
                 self.roi_front[0] = dst[0, 0, 0] + x0
                 self.roi_front[1] = dst[0, 0, 1] + y0
                 if show:
